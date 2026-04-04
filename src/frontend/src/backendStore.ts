@@ -12,6 +12,32 @@ import { createActorWithConfig, loadConfig } from "./config";
 import type { ConnectionRequest, User } from "./types";
 import { StorageClient } from "./utils/StorageClient";
 
+// ─── Error sanitization ──────────────────────────────────────────────────────
+
+const ICP_INTERNAL_KEYWORDS = [
+  "AgentHTTP",
+  "Replica",
+  "Certificate",
+  "fetch",
+  "Failed to fetch",
+  "NetworkError",
+  "CBOR",
+  "Could not decode",
+];
+
+function sanitizeError(e: unknown): string {
+  const msg = String(e);
+  if (ICP_INTERNAL_KEYWORDS.some((kw) => msg.includes(kw))) {
+    return "Could not connect to server. Please try again.";
+  }
+  // Extract human-readable part after the last ": "
+  const colonIdx = msg.lastIndexOf(": ");
+  if (colonIdx !== -1) {
+    return msg.substring(colonIdx + 2);
+  }
+  return msg;
+}
+
 // ─── Raw Motoko types ────────────────────────────────────────────────────────
 
 export interface MotokoUserProfile {
@@ -97,7 +123,7 @@ export async function backendRegister(
     if ("ok" in result) return { ok: moProfileToUser(result.ok) };
     return { err: result.err };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -111,7 +137,7 @@ export async function backendLogin(
     if ("ok" in result) return { ok: moProfileToUser(result.ok) };
     return { err: result.err };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -124,7 +150,7 @@ export async function backendLoginWithII(
     if ("ok" in result) return { ok: moProfileToUser(result.ok) };
     return { err: result.err };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -139,7 +165,7 @@ export async function backendRegisterWithII(
     if ("ok" in result) return { ok: moProfileToUser(result.ok) };
     return { err: result.err };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -191,7 +217,7 @@ export async function backendUpdateProfile(
     if ("ok" in result) return { ok: null };
     return { err: result.err };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -221,7 +247,7 @@ export async function backendSendConnectionRequest(
     if ("ok" in result) return { ok: null };
     return { err: result.err };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -237,7 +263,7 @@ export async function backendRespondToRequest(
     if ("ok" in result) return { ok: null };
     return { err: result.err };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -298,7 +324,7 @@ export async function backendSendMessage(
     if ("ok" in result) return { ok: result.ok };
     return { err: result.err };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -322,7 +348,7 @@ export async function backendSendSnap(
     if ("ok" in result) return { ok: result.ok };
     return { err: result.err };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -422,7 +448,7 @@ export async function backendUploadSnapMedia(
     const { hash } = await client.putFile(bytes);
     return { hash };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
@@ -454,7 +480,7 @@ export async function backendClearAllData(): Promise<
     if ("ok" in result) return { ok: null };
     return { err: result.err ?? "Unknown error" };
   } catch (e) {
-    return { err: String(e) };
+    return { err: sanitizeError(e) };
   }
 }
 
