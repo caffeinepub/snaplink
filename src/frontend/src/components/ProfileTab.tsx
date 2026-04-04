@@ -10,12 +10,14 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
+import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getFriends, updateUserProfile } from "../store";
 import type { User } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
 
 export function ProfileTab() {
   const { currentUser, logout, refreshUser } = useApp();
+  const { clear: iiClear } = useInternetIdentity();
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
@@ -43,6 +45,8 @@ export function ProfileTab() {
   };
 
   const handleLogout = () => {
+    // Clear Internet Identity session so the II identity doesn't auto-re-login
+    iiClear();
     logout();
   };
 

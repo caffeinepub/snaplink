@@ -200,11 +200,20 @@ function FindPeopleSection({
   const refresh = useCallback(() => {
     if (!currentUser) return;
     const results = searchUsersWithStatus(query, currentUser);
-    // For default view, exclude friends and limit to 10
     if (!query.trim()) {
-      setUsers(
-        results.filter((u) => u.connectionStatus !== "friends").slice(0, 10),
+      // Show ALL users (including friends), sorted:
+      // pending_received first, then none, then pending_sent, then friends last
+      const order: Record<string, number> = {
+        pending_received: 0,
+        none: 1,
+        pending_sent: 2,
+        friends: 3,
+      };
+      const sorted = results.sort(
+        (a, b) =>
+          (order[a.connectionStatus] ?? 99) - (order[b.connectionStatus] ?? 99),
       );
+      setUsers(sorted);
     } else {
       setUsers(results);
     }
@@ -212,6 +221,12 @@ function FindPeopleSection({
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  // Poll every 5 seconds so new sign-ups appear automatically
+  useEffect(() => {
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
   }, [refresh]);
 
   const handleAction = useCallback(
@@ -227,14 +242,15 @@ function FindPeopleSection({
         respondToRequest(user.requestId, false);
         onRefreshPending();
       }
-      // Refresh the list
+      // Refresh the list immediately
       setTimeout(() => refresh(), 50);
     },
     [currentUser, refresh, onRefreshPending],
   );
 
   const isEmptySearch = !query.trim();
-  const allConnected = isEmptySearch && users.length === 0;
+  // Only show "all connected" state if there are truly no other users in the system
+  const noOtherUsers = isEmptySearch && users.length === 0;
 
   return (
     <div className="mt-6">
@@ -282,18 +298,19 @@ function FindPeopleSection({
       {/* Section title */}
       {!query.trim() && users.length > 0 && (
         <p className="text-[#B0B0CC] text-xs font-semibold uppercase tracking-wider mb-3 px-1">
-          People You May Know
+          All People on SnapLink
         </p>
       )}
       {query.trim() && users.length > 0 && (
         <p className="text-[#B0B0CC] text-xs font-semibold uppercase tracking-wider mb-3 px-1">
-          {users.length} result{users.length !== 1 ? "s" : ""} for "{query}"
+          {users.length} result{users.length !== 1 ? "s" : ""} for &quot;{query}
+          &quot;
         </p>
       )}
 
       {/* User list */}
       <AnimatePresence mode="popLayout">
-        {allConnected ? (
+        {noOtherUsers ? (
           <motion.div
             key="all-connected"
             initial={{ opacity: 0, y: 8 }}
@@ -313,10 +330,10 @@ function FindPeopleSection({
               <UserCheck size={24} color="#00CFFF" />
             </div>
             <p className="text-white font-semibold text-sm">
-              You&apos;re all connected!
+              No other users yet!
             </p>
             <p className="text-[#B0B0CC] text-xs text-center">
-              You&apos;re connected with everyone 🎉
+              Be the first! Invite friends to join SnapLink 🎉
             </p>
           </motion.div>
         ) : query.trim() && users.length === 0 ? (

@@ -390,11 +390,19 @@ export function CameraTab() {
     isSupported,
   } = useCamera({ facingMode: "environment", quality: 0.85 });
 
+  // Load friends on user change
   useEffect(() => {
     if (currentUser) {
       setFriends(getFriends(currentUser.username));
     }
   }, [currentUser]);
+
+  // Re-fetch friends every time the Send sheet opens to ensure fresh list
+  useEffect(() => {
+    if (showSendSheet && currentUser) {
+      setFriends(getFriends(currentUser.username));
+    }
+  }, [showSendSheet, currentUser]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: only run on mount
   useEffect(() => {
@@ -675,28 +683,35 @@ export function CameraTab() {
                         y1="1"
                         x2="23"
                         y2="23"
-                        stroke="#FF6B6B"
+                        stroke="#FF4444"
                         strokeWidth="2"
                       />
                     </svg>
                   </div>
-                  <p className="text-[#B0B0CC] text-sm text-center">
-                    {error.message}
-                  </p>
-                  <PressableButton
+                  <div className="text-center px-6">
+                    <p className="text-white font-semibold mb-1">
+                      Camera unavailable
+                    </p>
+                    <p className="text-[#B0B0CC] text-sm">{error?.message}</p>
+                  </div>
+                  <button
+                    type="button"
                     onClick={() => startCamera()}
-                    className="px-6 py-2.5 rounded-full text-sm font-semibold btn-glow-blue text-white"
+                    className="px-6 py-3 rounded-2xl font-semibold text-sm text-white"
+                    style={{
+                      background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                    }}
                   >
                     Try Again
-                  </PressableButton>
+                  </button>
                 </div>
               ) : (
                 <>
                   <video
                     ref={videoRef}
                     autoPlay
-                    muted
                     playsInline
+                    muted
                     className="w-full h-full object-cover"
                     style={{ display: isActive ? "block" : "none" }}
                   />
@@ -888,15 +903,17 @@ export function CameraTab() {
                       : "0 0 25px rgba(0, 207, 255, 0.4), 0 0 60px rgba(0, 207, 255, 0.15)",
                     animation: isRecording
                       ? "recording-ring 1s ease-in-out infinite"
-                      : undefined,
+                      : "none",
+                    cursor: isActive ? "pointer" : "default",
                     touchAction: "none",
+                    userSelect: "none",
                   }}
                   data-ocid="camera.primary_button"
                 >
                   <motion.div
                     animate={{
-                      scale: isRecording ? 0.55 : 1,
-                      borderRadius: isRecording ? "6px" : "50%",
+                      borderRadius: isRecording ? "8px" : "50%",
+                      scale: isRecording ? 0.55 : 0.82,
                     }}
                     transition={{ duration: 0.2 }}
                     className="w-14 h-14"
@@ -1028,107 +1045,113 @@ export function CameraTab() {
                 delay: 0.1,
                 duration: 0.35,
               }}
-              className="px-5 pt-4 pb-8"
+              className="flex flex-col flex-none max-h-[55vh]"
               style={{ background: "#1A1A2E", borderTop: "1px solid #2A3048" }}
             >
-              {/* Caption input */}
-              <div className="mb-4">
-                <div
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl"
+              {/* Scrollable options area */}
+              <div className="px-5 pt-4 flex-1 min-h-0 overflow-y-auto">
+                {/* Caption input */}
+                <div className="mb-4">
+                  <div
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-2xl"
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="Add a caption..."
+                      value={snapCaption}
+                      onChange={(e) => setSnapCaption(e.target.value)}
+                      className="flex-1 bg-transparent text-white text-sm outline-none placeholder-[#B0B0CC]"
+                      maxLength={150}
+                      data-ocid="camera.input"
+                    />
+                    {snapCaption && (
+                      <button
+                        type="button"
+                        onClick={() => setSnapCaption("")}
+                        className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
+                        style={{ background: "rgba(255,255,255,0.15)" }}
+                        aria-label="Clear caption"
+                      >
+                        <X size={11} color="white" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* AI Assistant button */}
+                <PressableButton
+                  onClick={() => setShowAiAssistant(true)}
+                  className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-4"
                   style={{
-                    background: "rgba(255,255,255,0.06)",
-                    border: "1px solid rgba(255,255,255,0.1)",
+                    border: "1px solid rgba(0,207,255,0.4)",
+                    background: "rgba(0,207,255,0.08)",
+                    color: "#00CFFF",
                   }}
+                  data-ocid="camera.open_modal_button"
                 >
-                  <input
-                    type="text"
-                    placeholder="Add a caption..."
-                    value={snapCaption}
-                    onChange={(e) => setSnapCaption(e.target.value)}
-                    className="flex-1 bg-transparent text-white text-sm outline-none placeholder-[#B0B0CC]"
-                    maxLength={150}
-                    data-ocid="camera.input"
-                  />
-                  {snapCaption && (
+                  <Sparkles size={16} />
+                  AI Assistant
+                </PressableButton>
+
+                {/* Ephemeral toggle (photo only) */}
+                {!isVideoSnap && (
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <p className="text-white font-semibold text-sm">
+                        Ephemeral snap
+                      </p>
+                      <p className="text-[#B0B0CC] text-xs mt-0.5">
+                        Disappears after {timerDuration}s
+                      </p>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => setSnapCaption("")}
-                      className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
-                      style={{ background: "rgba(255,255,255,0.15)" }}
-                      aria-label="Clear caption"
+                      onClick={() => setIsEphemeral((e) => !e)}
+                      className="w-12 h-6 rounded-full transition-all duration-300 relative"
+                      style={{
+                        background: isEphemeral
+                          ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
+                          : "#2A3048",
+                      }}
+                      aria-label={`Ephemeral mode ${isEphemeral ? "on" : "off"}`}
+                      data-ocid="camera.switch"
                     >
-                      <X size={11} color="white" />
+                      <div
+                        className="absolute w-5 h-5 rounded-full top-0.5 transition-all duration-300"
+                        style={{
+                          left: isEphemeral ? "calc(100% - 22px)" : "2px",
+                          background: "white",
+                        }}
+                      />
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
-              {/* AI Assistant button */}
-              <PressableButton
-                onClick={() => setShowAiAssistant(true)}
-                className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-4"
-                style={{
-                  border: "1px solid rgba(0,207,255,0.4)",
-                  background: "rgba(0,207,255,0.08)",
-                  color: "#00CFFF",
-                }}
-                data-ocid="camera.open_modal_button"
+              {/* Sticky Send To button */}
+              <div
+                className="px-5 pt-3 pb-6 flex-shrink-0"
+                style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
               >
-                <Sparkles size={16} />
-                AI Assistant
-              </PressableButton>
-
-              {/* Ephemeral toggle (photo only) */}
-              {!isVideoSnap && (
-                <div className="flex items-center justify-between mb-5">
-                  <div>
-                    <p className="text-white font-semibold text-sm">
-                      Ephemeral snap
-                    </p>
-                    <p className="text-[#B0B0CC] text-xs mt-0.5">
-                      Disappears after {timerDuration}s
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsEphemeral((e) => !e)}
-                    className="w-12 h-6 rounded-full transition-all duration-300 relative"
-                    style={{
-                      background: isEphemeral
-                        ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
-                        : "#2A3048",
-                    }}
-                    aria-label={`Ephemeral mode ${isEphemeral ? "on" : "off"}`}
-                    data-ocid="camera.switch"
-                  >
-                    <div
-                      className="absolute w-5 h-5 rounded-full top-0.5 transition-all duration-300"
-                      style={{
-                        left: isEphemeral ? "calc(100% - 22px)" : "2px",
-                        background: "white",
-                      }}
-                    />
-                  </button>
-                </div>
-              )}
-
-              {isVideoSnap && <div className="mb-5" />}
-
-              {/* Send To button */}
-              <PressableButton
-                onClick={() => setShowSendSheet(true)}
-                className="w-full py-4 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2"
-                style={{
-                  background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
-                  boxShadow: "0 0 25px rgba(0,207,255,0.3)",
-                }}
-                data-ocid="camera.secondary_button"
-              >
-                <Send size={18} />
-                {selectedFriends.length > 0
-                  ? `Send To... (${selectedFriends.length} selected)`
-                  : "Send To..."}
-              </PressableButton>
+                <PressableButton
+                  onClick={() => setShowSendSheet(true)}
+                  className="w-full py-4 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2"
+                  style={{
+                    background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                    boxShadow: "0 0 25px rgba(0,207,255,0.3)",
+                  }}
+                  data-ocid="camera.secondary_button"
+                >
+                  <Send size={18} />
+                  {selectedFriends.length > 0
+                    ? `Send To... (${selectedFriends.length} selected)`
+                    : "Send To..."}
+                </PressableButton>
+              </div>
             </motion.div>
           </motion.div>
         )}

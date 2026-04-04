@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
@@ -20,6 +20,9 @@ export function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const { setCurrentUser } = useApp();
   const { login: iiLogin, identity, isLoggingIn } = useInternetIdentity();
+
+  // Use a ref so this flag persists across re-renders without resetting
+  const iiHandledRef = useRef(false);
 
   const handleIILogin = () => {
     setError("");
@@ -57,14 +60,20 @@ export function LoginScreen() {
     }
   };
 
-  const [iiHandled, setIiHandled] = useState(false);
-  if (identity && !identity.getPrincipal().isAnonymous() && !iiHandled) {
-    setIiHandled(true);
-    const principal = identity.getPrincipal().toString();
-    const user = loginOrRegisterII(principal);
-    persistUser(user);
-    setCurrentUser(user);
-  }
+  // Handle II identity becoming available after login
+  useEffect(() => {
+    if (
+      identity &&
+      !identity.getPrincipal().isAnonymous() &&
+      !iiHandledRef.current
+    ) {
+      iiHandledRef.current = true;
+      const principal = identity.getPrincipal().toString();
+      const user = loginOrRegisterII(principal);
+      persistUser(user);
+      setCurrentUser(user);
+    }
+  }, [identity, setCurrentUser]);
 
   const nameId = "auth-display-name";
   const usernameId = "auth-username";
