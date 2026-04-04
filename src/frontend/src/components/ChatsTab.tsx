@@ -5,13 +5,17 @@ import {
   CheckCheck,
   Image,
   MessageCircle,
+  MessageSquarePlus,
   Search,
   Send,
+  UserPlus,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { backendGetFriends } from "../backendStore";
 import { useApp } from "../context/AppContext";
+import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
   getConversationMessages,
   getConversations,
@@ -19,7 +23,7 @@ import {
   sendMessage,
   viewSnap,
 } from "../store";
-import type { ConversationSummary, Message } from "../types";
+import type { ConversationSummary, Message, User } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
 
 function formatTime(ts: number): string {
@@ -37,7 +41,6 @@ function formatTime(ts: number): string {
 }
 
 // Wraps video element to allow biome suppression at component level
-// autoPlay + muted needed for mobile browser autoplay policy; we unmute after play starts
 function SnapVideo({ src }: { src: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -48,12 +51,9 @@ function SnapVideo({ src }: { src: string }) {
     video
       .play()
       .then(() => {
-        // Unmute after playback starts to get audio
         video.muted = false;
       })
-      .catch(() => {
-        // If autoplay still fails, keep controls visible so user can tap play
-      });
+      .catch(() => {});
   }, []);
 
   return (
@@ -72,7 +72,6 @@ function SnapVideo({ src }: { src: string }) {
   );
 }
 
-// Full-screen snap viewer overlay
 function SnapViewer({
   msg,
   currentUsername,
@@ -86,7 +85,6 @@ function SnapViewer({
 }) {
   const isReceived = msg.receiverId === currentUsername;
 
-  // Mark as viewed when overlay opens
   useEffect(() => {
     if (isReceived && !msg.snapViewed) {
       viewSnap(msg.id);
@@ -104,7 +102,6 @@ function SnapViewer({
       style={{ background: "rgba(0,0,0,0.95)" }}
       onClick={onClose}
     >
-      {/* Close button */}
       <button
         type="button"
         className="absolute top-10 right-4 z-10 w-10 h-10 rounded-full flex items-center justify-center"
@@ -114,7 +111,6 @@ function SnapViewer({
         <X size={20} color="white" />
       </button>
 
-      {/* Caption / sender label */}
       <div className="absolute top-10 left-4 right-14">
         <p className="text-white font-semibold text-sm">
           {isReceived
@@ -129,8 +125,7 @@ function SnapViewer({
           )}
       </div>
 
-      {/* Media - stop click propagation so tapping media doesn't close */}
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: overlay background closes on click; media area is interactive */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: overlay background closes on click */}
       <div
         className="w-full max-w-sm px-4"
         onClick={(e) => e.stopPropagation()}
@@ -161,7 +156,6 @@ function SnapViewer({
         )}
       </div>
 
-      {/* Tap anywhere to close hint */}
       <p className="absolute bottom-8 text-[#B0B0CC] text-xs">
         Tap anywhere to close
       </p>
@@ -169,7 +163,6 @@ function SnapViewer({
   );
 }
 
-// Snap bubble component for chat messages
 function SnapBubble({
   msg,
   isSent,
@@ -182,7 +175,6 @@ function SnapBubble({
   const isViewed = msg.snapViewed;
   const isReceived = !isSent;
 
-  // Received snap: show "Tap to open" if not viewed, or "Opened" if viewed
   if (isReceived) {
     if (isViewed) {
       return (
@@ -218,7 +210,6 @@ function SnapBubble({
     );
   }
 
-  // Sent snap: show preview thumbnail or sent label
   return (
     <button
       type="button"
@@ -281,14 +272,174 @@ function SnapBubble({
   );
 }
 
+// ─── New Chat Sheet ───────────────────────────────────────────────────────────
+// Slide-up sheet to pick a friend and start a chat
+
+function NewChatSheet({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (user: User) => void;
+  onClose: () => void;
+}) {
+  const { currentUser } = useApp();
+  const { identity } = useInternetIdentity();
+  const [friends, setFriends] = useState<User[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    backendGetFriends(currentUser.username, identity)
+      .then(setFriends)
+      .catch(() => setFriends([]))
+      .finally(() => setLoading(false));
+  }, [currentUser, identity]);
+
+  const filtered = query.trim()
+    ? friends.filter(
+        (f) =>
+          f.displayName.toLowerCase().includes(query.toLowerCase()) ||
+          f.username.toLowerCase().includes(query.toLowerCase()),
+      )
+    : friends;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      style={{ background: "rgba(0,0,0,0.6)" }}
+      onClick={onClose}
+    >
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: sheet content stops propagation */}
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.35 }}
+        className="rounded-t-3xl px-5 pt-5 pb-8"
+        style={{ background: "#1A1F33", maxHeight: "75vh", overflowY: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Handle */}
+        <div className="flex justify-center mb-4">
+          <div
+            className="w-10 h-1 rounded-full"
+            style={{ background: "rgba(255,255,255,0.15)" }}
+          />
+        </div>
+
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-white font-bold text-lg">New Chat</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(255,255,255,0.08)" }}
+          >
+            <X size={16} color="#B0B0CC" />
+          </button>
+        </div>
+
+        {/* Search */}
+        <div
+          className="relative mb-4"
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            borderRadius: 14,
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+        >
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2"
+            color="#B0B0CC"
+          />
+          <input
+            className="w-full bg-transparent text-white text-sm pl-9 pr-8 py-2.5 outline-none placeholder-[#B0B0CC]"
+            placeholder="Search friends..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            // biome-ignore lint/a11y/noAutofocus: intentional focus for search UX
+            autoFocus
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2"
+            >
+              <X size={12} color="#B0B0CC" />
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-8 gap-3">
+            <div
+              className="w-4 h-4 rounded-full border-2 animate-spin"
+              style={{ borderColor: "#00CFFF", borderTopColor: "transparent" }}
+            />
+            <p className="text-[#B0B0CC] text-sm">Loading friends...</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 gap-2">
+            <UserPlus size={28} color="#2A3048" />
+            <p className="text-[#B0B0CC] text-sm">
+              {friends.length === 0
+                ? "Add friends first to start chatting"
+                : `No friends matching "${query}"`}
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {filtered.map((friend) => (
+              <button
+                key={friend.username}
+                type="button"
+                onClick={() => onSelect(friend)}
+                className="flex items-center gap-3 px-4 py-3 rounded-2xl text-left w-full active:opacity-70 transition-opacity"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                }}
+              >
+                <UserAvatar
+                  name={friend.displayName}
+                  size={44}
+                  avatarUrl={friend.avatarUrl}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-semibold text-sm truncate">
+                    {friend.displayName}
+                  </p>
+                  <p className="text-[#B0B0CC] text-xs truncate">
+                    @{friend.username}
+                  </p>
+                </div>
+                <MessageSquarePlus size={18} color="#00CFFF" />
+              </button>
+            ))}
+          </div>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Conversation List ────────────────────────────────────────────────────────
+
 function ConversationList({
   onSelect,
 }: {
-  onSelect: (username: string) => void;
+  onSelect: (username: string, displayName: string) => void;
 }) {
   const { currentUser } = useApp();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showNewChat, setShowNewChat] = useState(false);
 
   const refresh = useCallback(() => {
     if (currentUser) {
@@ -298,7 +449,7 @@ function ConversationList({
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 5000);
+    const interval = setInterval(refresh, 3000);
     return () => clearInterval(interval);
   }, [refresh]);
 
@@ -309,48 +460,68 @@ function ConversationList({
       c.username.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
+  const handleNewChatSelect = (user: User) => {
+    setShowNewChat(false);
+    onSelect(user.username, user.displayName);
+  };
+
   return (
     <div className="flex flex-col h-full" style={{ background: "#1A1A2E" }}>
-      <div className="px-5 pt-12 pb-4">
-        <h1 className="text-2xl font-bold text-white">Chats</h1>
+      {/* Header */}
+      <div className="px-5 pt-12 pb-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-white">Chats</h1>
+          {/* New Chat button */}
+          <PressableButton
+            onClick={() => setShowNewChat(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
+            style={{
+              background: "linear-gradient(135deg, #00CFFF22, #BD00FF22)",
+              border: "1px solid rgba(0,207,255,0.3)",
+              color: "#00CFFF",
+            }}
+            data-ocid="chats.primary_button"
+          >
+            <MessageSquarePlus size={15} />
+            <span>New Chat</span>
+          </PressableButton>
+        </div>
       </div>
 
-      {/* Search bar — only shown when there are conversations */}
-      {conversations.length > 0 && (
-        <div className="px-5 pb-3">
-          <div
-            className="relative"
-            style={{
-              background: "rgba(255,255,255,0.04)",
-              borderRadius: 16,
-              border: "1px solid rgba(255,255,255,0.08)",
-            }}
-          >
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2"
-              color="#B0B0CC"
-            />
-            <input
-              className="w-full bg-transparent text-white text-sm pl-9 pr-8 py-2.5 outline-none placeholder-[#B0B0CC]"
-              placeholder="Search chats..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              data-ocid="chats.search_input"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2"
-                aria-label="Clear search"
-              >
-                <X size={12} color="#B0B0CC" />
-              </button>
-            )}
-          </div>
+      {/* Search bar — always visible */}
+      <div className="px-5 pb-3">
+        <div
+          className="relative"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            borderRadius: 16,
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+        >
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2"
+            color="#B0B0CC"
+          />
+          <input
+            className="w-full bg-transparent text-white text-sm pl-9 pr-8 py-2.5 outline-none placeholder-[#B0B0CC]"
+            placeholder="Search chats..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            data-ocid="chats.search_input"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2"
+              aria-label="Clear search"
+            >
+              <X size={12} color="#B0B0CC" />
+            </button>
+          )}
         </div>
-      )}
+      </div>
 
       {conversations.length === 0 ? (
         <div
@@ -366,7 +537,8 @@ function ConversationList({
           <div>
             <p className="text-white font-semibold text-lg">No chats yet</p>
             <p className="text-[#B0B0CC] text-sm mt-1">
-              Connect with friends to start chatting
+              Tap <span className="text-[#00CFFF] font-semibold">New Chat</span>{" "}
+              to message a friend
             </p>
           </div>
         </div>
@@ -386,7 +558,7 @@ function ConversationList({
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.05, ease: [0.16, 1, 0.3, 1] }}
-                onClick={() => onSelect(conv.username)}
+                onClick={() => onSelect(conv.username, conv.displayName)}
                 className="flex items-center gap-3 px-5 py-3.5 cursor-pointer active:bg-[#1A1F33] transition-colors"
                 style={{ borderBottom: "1px solid rgba(42,48,72,0.5)" }}
                 data-ocid={`chats.item.${i + 1}`}
@@ -424,9 +596,21 @@ function ConversationList({
           })}
         </div>
       )}
+
+      {/* New Chat sheet */}
+      <AnimatePresence>
+        {showNewChat && (
+          <NewChatSheet
+            onSelect={handleNewChatSelect}
+            onClose={() => setShowNewChat(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+// ─── Chat View ────────────────────────────────────────────────────────────────
 
 function ChatView({
   username,
@@ -460,7 +644,7 @@ function ChatView({
     return () => clearInterval(interval);
   }, [refresh]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional - scroll on message count change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional scroll on message count change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
@@ -635,6 +819,8 @@ function ChatView({
   );
 }
 
+// ─── ChatsTab ─────────────────────────────────────────────────────────────────
+
 export function ChatsTab() {
   const { selectedConversation, setSelectedConversation, setActiveTab } =
     useApp();
@@ -644,25 +830,28 @@ export function ChatsTab() {
     displayName: string;
   } | null>(null);
 
+  const openConversation = useCallback(
+    (username: string, displayName: string) => {
+      setConvDetails({ username, displayName });
+      setSelectedConversation(username);
+    },
+    [setSelectedConversation],
+  );
+
   useEffect(() => {
     if (selectedConversation && currentUser) {
-      const convs = getConversations(currentUser.username);
-      const found = convs.find((c) => c.username === selectedConversation);
-      if (found) {
-        setConvDetails({
-          username: found.username,
-          displayName: found.displayName,
-        });
-      } else {
+      if (!convDetails || convDetails.username !== selectedConversation) {
+        const convs = getConversations(currentUser.username);
+        const found = convs.find((c) => c.username === selectedConversation);
         setConvDetails({
           username: selectedConversation,
-          displayName: selectedConversation,
+          displayName: found?.displayName ?? selectedConversation,
         });
       }
     } else {
       setConvDetails(null);
     }
-  }, [selectedConversation, currentUser]);
+  }, [selectedConversation, currentUser, convDetails]);
 
   const handleCameraFromChat = () => {
     setActiveTab("camera");
@@ -695,7 +884,7 @@ export function ChatsTab() {
           transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.35 }}
           className="absolute inset-0"
         >
-          <ConversationList onSelect={(u) => setSelectedConversation(u)} />
+          <ConversationList onSelect={openConversation} />
         </motion.div>
       )}
     </AnimatePresence>

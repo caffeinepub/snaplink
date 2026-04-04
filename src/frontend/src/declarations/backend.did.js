@@ -78,6 +78,8 @@ const serviceDefinition = {
   getUnreadCount:         IDL.Func([IDL.Text], [IDL.Nat], []),
   getPendingRequestCount: IDL.Func([IDL.Text], [IDL.Nat], []),
   getConversations:       IDL.Func([IDL.Text], [IDL.Vec(ConversationEntry)], []),
+  // Admin
+  clearAllData:     IDL.Func([], [IDL.Variant({ ok: IDL.Null })], []),
 };
 
 export const idlService = IDL.Service(serviceDefinition);
@@ -145,6 +147,7 @@ export const idlFactory = ({ IDL }) => {
     getUnreadCount:         IDL.Func([IDL.Text], [IDL.Nat], []),
     getPendingRequestCount: IDL.Func([IDL.Text], [IDL.Nat], []),
     getConversations:       IDL.Func([IDL.Text], [IDL.Vec(ConversationEntry)], []),
+    clearAllData:     IDL.Func([], [IDL.Variant({ ok: IDL.Null })], []),
   });
 };
 

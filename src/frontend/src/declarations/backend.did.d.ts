@@ -75,6 +75,8 @@ export interface _SERVICE {
   getUnreadCount: ActorMethod<[string], bigint>;
   getPendingRequestCount: ActorMethod<[string], bigint>;
   getConversations: ActorMethod<[string], ConversationEntry[]>;
+  // Admin
+  clearAllData: ActorMethod<[], { ok: null }>;
 }
 
 export declare const idlService: IDL.ServiceClass;

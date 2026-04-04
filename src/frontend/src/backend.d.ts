@@ -47,4 +47,8 @@ export interface backendInterface {
   getUnreadCount(callerUsername: string): Promise<bigint>;
   getPendingRequestCount(callerUsername: string): Promise<bigint>;
   getConversations(callerUsername: string): Promise<ConversationEntry[]>;
+
+  // ── Admin ─────────────────────────────────────────────────────────────────
+  /** Wipe ALL data from the canister (users, connections, messages). Irreversible. */
+  clearAllData(): Promise<{ ok: null }>;
 }

@@ -25,6 +25,23 @@ export interface Some<T> { __kind__: "Some"; value: T; }
 export interface None    { __kind__: "None"; }
 export type Option<T> = Some<T> | None;
 
+// ─── ExternalBlob stub (required by config.ts for blob storage compatibility) ─
+
+export class ExternalBlob {
+  constructor(
+    private data: Uint8Array,
+    public onProgress?: (p: number) => void,
+  ) {}
+
+  async getBytes(): Promise<Uint8Array> {
+    return this.data;
+  }
+
+  static fromURL(_url: string): ExternalBlob {
+    return new ExternalBlob(new Uint8Array());
+  }
+}
+
 // ─── Public interface ─────────────────────────────────────────────────────────
 
 export interface backendInterface {
@@ -53,6 +70,8 @@ export interface backendInterface {
   getUnreadCount(callerUsername: string): Promise<bigint>;
   getPendingRequestCount(callerUsername: string): Promise<bigint>;
   getConversations(callerUsername: string): Promise<any[]>;
+  // Admin
+  clearAllData(): Promise<{ ok: null }>;
 }
 
 // ─── Concrete class ───────────────────────────────────────────────────────────
@@ -146,6 +165,12 @@ export class Backend implements backendInterface {
   getConversations(callerUsername: string): Promise<any[]> {
     return this.call(() => (this.actor as any).getConversations(callerUsername));
   }
+
+  // ── Admin ───────────────────────────────────────────────────────────────────
+
+  clearAllData(): Promise<{ ok: null }> {
+    return this.call(() => (this.actor as any).clearAllData());
+  }
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
@@ -159,17 +184,33 @@ export interface CreateActorOptions {
 
 export function createActor(
   canisterId: string,
+  uploadFileOrOptions?: ((blob: ExternalBlob) => Promise<Uint8Array>) | CreateActorOptions,
+  downloadFile?: (bytes: Uint8Array) => Promise<ExternalBlob>,
   options: CreateActorOptions = {},
 ): Backend {
-  const agent = options.agent ||
-    HttpAgent.createSync({ ...options.agentOptions });
-  if (options.agent && options.agentOptions) {
-    console.warn("Detected both agent and agentOptions passed to createActor. Ignoring agentOptions.");
+  // If the second arg is a plain options object (not a function), treat it as options
+  const resolvedOptions: CreateActorOptions =
+    typeof uploadFileOrOptions === "object" &&
+    uploadFileOrOptions !== null &&
+    !("getBytes" in uploadFileOrOptions)
+      ? (uploadFileOrOptions as CreateActorOptions)
+      : options;
+
+  const agent =
+    resolvedOptions.agent ||
+    HttpAgent.createSync({ ...resolvedOptions.agentOptions });
+
+  if (resolvedOptions.agent && resolvedOptions.agentOptions) {
+    console.warn(
+      "Detected both agent and agentOptions passed to createActor. Ignoring agentOptions.",
+    );
   }
+
   const actor = Actor.createActor<_SERVICE>(idlFactory, {
     agent,
     canisterId,
-    ...options.actorOptions,
+    ...resolvedOptions.actorOptions,
   });
-  return new Backend(actor, options.processError);
+
+  return new Backend(actor, resolvedOptions.processError);
 }

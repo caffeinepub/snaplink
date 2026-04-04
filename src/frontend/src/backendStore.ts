@@ -392,6 +392,22 @@ export async function backendGetConversations(
   }
 }
 
+// ─── Admin ───────────────────────────────────────────────────────────────────
+
+/** Wipes all users, messages, and connections from the canister. */
+export async function backendClearAllData(): Promise<
+  { ok: null } | { err: string }
+> {
+  try {
+    const a = await anonActor();
+    const result = await a.clearAllData();
+    if ("ok" in result) return { ok: null };
+    return { err: result.err ?? "Unknown error" };
+  } catch (e) {
+    return { err: String(e) };
+  }
+}
+
 // ─── Demo account seeding ────────────────────────────────────────────────────
 
 const DEMO_ACCOUNTS = [

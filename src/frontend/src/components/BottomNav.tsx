@@ -1,8 +1,10 @@
 import { Camera, MessageCircle, User, Users } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
+import { backendGetPendingRequests } from "../backendStore";
 import { useApp } from "../context/AppContext";
-import { getPendingRequestCount, getUnreadCount } from "../store";
+import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { getUnreadCount } from "../store";
 import type { Tab } from "../types";
 
 interface NavItem {
@@ -13,19 +15,33 @@ interface NavItem {
 
 export function BottomNav() {
   const { activeTab, setActiveTab, currentUser } = useApp();
+  const { identity } = useInternetIdentity();
   const [unreadCount, setUnreadCount] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     if (!currentUser) return;
-    const refresh = () => {
+
+    const refresh = async () => {
+      // Unread messages: still from local store (messages are local)
       setUnreadCount(getUnreadCount(currentUser.username));
-      setPendingCount(getPendingRequestCount(currentUser.username));
+
+      // Pending requests: from backend (mutual system)
+      try {
+        const pending = await backendGetPendingRequests(
+          currentUser.username,
+          identity,
+        );
+        setPendingCount(pending.length);
+      } catch {
+        setPendingCount(0);
+      }
     };
+
     refresh();
     const interval = setInterval(refresh, 5000);
     return () => clearInterval(interval);
-  }, [currentUser]);
+  }, [currentUser, identity]);
 
   const navItems: NavItem[] = [
     { id: "chats", icon: <MessageCircle size={22} />, label: "Chats" },

@@ -40,14 +40,57 @@ actor SnapLink {
     snapViewed : Bool;
   };
 
-  // ========== STATE ==========
+  // ========== STABLE STATE ==========
+  // Using stable vars so data persists across canister upgrades.
 
-  var usersByUsername : Map.Map<Text, UserProfile> = Map.empty<Text, UserProfile>();
-  var usersByPrincipal : Map.Map<Text, Text> = Map.empty<Text, Text>();
-  var connectionRequests : Map.Map<Text, ConnectionRequest> = Map.empty<Text, ConnectionRequest>();
-  var messages : Map.Map<Text, Message> = Map.empty<Text, Message>();
-  var messageCounter : Nat = 0;
-  var requestCounter : Nat = 0;
+  stable var stableUsersByUsername : [(Text, UserProfile)] = [];
+  stable var stableUsersByPrincipal : [(Text, Text)] = [];
+  stable var stableConnectionRequests : [(Text, ConnectionRequest)] = [];
+  stable var stableMessages : [(Text, Message)] = [];
+  stable var stableMessageCounter : Nat = 0;
+  stable var stableRequestCounter : Nat = 0;
+
+  // ========== STATE (loaded from stable on init) ==========
+
+  var usersByUsername : Map.Map<Text, UserProfile> = Map.fromIter(stableUsersByUsername.vals());
+  var usersByPrincipal : Map.Map<Text, Text> = Map.fromIter(stableUsersByPrincipal.vals());
+  var connectionRequests : Map.Map<Text, ConnectionRequest> = Map.fromIter(stableConnectionRequests.vals());
+  var messages : Map.Map<Text, Message> = Map.fromIter(stableMessages.vals());
+  var messageCounter : Nat = stableMessageCounter;
+  var requestCounter : Nat = stableRequestCounter;
+
+  // ========== SYSTEM HOOKS ==========
+  // Save to stable before upgrade, restore after.
+
+  system func preupgrade() {
+    stableUsersByUsername := [];
+    for ((k, v) in usersByUsername.entries()) {
+      stableUsersByUsername := stableUsersByUsername.concat([(k, v)]);
+    };
+    stableUsersByPrincipal := [];
+    for ((k, v) in usersByPrincipal.entries()) {
+      stableUsersByPrincipal := stableUsersByPrincipal.concat([(k, v)]);
+    };
+    stableConnectionRequests := [];
+    for ((k, v) in connectionRequests.entries()) {
+      stableConnectionRequests := stableConnectionRequests.concat([(k, v)]);
+    };
+    stableMessages := [];
+    for ((k, v) in messages.entries()) {
+      stableMessages := stableMessages.concat([(k, v)]);
+    };
+    stableMessageCounter := messageCounter;
+    stableRequestCounter := requestCounter;
+  };
+
+  system func postupgrade() {
+    usersByUsername := Map.fromIter(stableUsersByUsername.vals());
+    usersByPrincipal := Map.fromIter(stableUsersByPrincipal.vals());
+    connectionRequests := Map.fromIter(stableConnectionRequests.vals());
+    messages := Map.fromIter(stableMessages.vals());
+    messageCounter := stableMessageCounter;
+    requestCounter := stableRequestCounter;
+  };
 
   // ========== HELPERS ==========
 
@@ -86,7 +129,6 @@ actor SnapLink {
   // Priority: explicit callerUsername param (for username/password users) > II principal lookup
   func resolveUsername(callerUsername : Text, caller : Principal) : ?Text {
     if (callerUsername.size() > 0) {
-      // Validate that the user actually exists
       switch (usersByUsername.get(callerUsername)) {
         case (?_) return ?callerUsername;
         case (null) return null;
@@ -108,6 +150,27 @@ actor SnapLink {
       };
     };
     null;
+  };
+
+  // ========== ADMIN ==========
+
+  // Wipe ALL user data, connections, and messages from the canister.
+  // This is a destructive operation and cannot be undone.
+  public func clearAllData() : async { #ok } {
+    usersByUsername := Map.empty<Text, UserProfile>();
+    usersByPrincipal := Map.empty<Text, Text>();
+    connectionRequests := Map.empty<Text, ConnectionRequest>();
+    messages := Map.empty<Text, Message>();
+    messageCounter := 0;
+    requestCounter := 0;
+    // Also clear stable state immediately so it doesn't restore on next upgrade
+    stableUsersByUsername := [];
+    stableUsersByPrincipal := [];
+    stableConnectionRequests := [];
+    stableMessages := [];
+    stableMessageCounter := 0;
+    stableRequestCounter := 0;
+    #ok;
   };
 
   // ========== AUTH ==========

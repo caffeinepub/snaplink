@@ -4,17 +4,18 @@ import {
   Edit3,
   LogOut,
   MessageCircle,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { backendClearAllData } from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
   getFriends,
   getUserProfileCache,
-  mergeWithCache,
   setCurrentUser as persistUser,
   setUserProfileCache,
 } from "../store";
@@ -31,6 +32,11 @@ export function ProfileTab() {
   const [saving, setSaving] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  // Clear all data state
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
 
   useEffect(() => {
     if (currentUser) {
@@ -65,6 +71,20 @@ export function ProfileTab() {
     // Clear Internet Identity session so the II identity doesn't auto-re-login
     iiClear();
     logout();
+  };
+
+  const handleClearAllData = async () => {
+    setClearing(true);
+    setClearError(null);
+    const result = await backendClearAllData();
+    setClearing(false);
+    if ("ok" in result) {
+      // Data cleared — sign out since account no longer exists
+      iiClear();
+      logout();
+    } else {
+      setClearError(result.err);
+    }
   };
 
   const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -340,7 +360,7 @@ export function ProfileTab() {
       </div>
 
       {/* Logout */}
-      <div className="mx-5 mb-4">
+      <div className="mx-5 mb-3">
         <PressableButton
           onClick={handleLogout}
           className="w-full py-3.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2"
@@ -354,6 +374,128 @@ export function ProfileTab() {
           <LogOut size={16} />
           Sign Out
         </PressableButton>
+      </div>
+
+      {/* Clear All Data */}
+      <div className="mx-5 mb-4">
+        <PressableButton
+          onClick={() => {
+            setShowClearConfirm((prev) => !prev);
+            setClearError(null);
+          }}
+          className="w-full py-3.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2"
+          style={{
+            background: showClearConfirm
+              ? "rgba(255,59,48,0.18)"
+              : "rgba(255,59,48,0.08)",
+            border: "1.5px solid rgba(255,59,48,0.4)",
+            color: "#FF3B30",
+          }}
+          data-ocid="profile.open_modal_button"
+        >
+          <Trash2 size={16} />
+          Clear All Data
+        </PressableButton>
+
+        {/* Inline confirmation panel */}
+        <AnimatePresence>
+          {showClearConfirm && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, marginTop: 0 }}
+              animate={{ opacity: 1, height: "auto", marginTop: 8 }}
+              exit={{ opacity: 0, height: 0, marginTop: 0 }}
+              transition={{ duration: 0.22, ease: "easeInOut" }}
+              style={{ overflow: "hidden" }}
+              data-ocid="profile.dialog"
+            >
+              <div
+                className="rounded-2xl p-4"
+                style={{
+                  background: "rgba(255,59,48,0.07)",
+                  border: "1.5px solid rgba(255,59,48,0.3)",
+                }}
+              >
+                <div className="flex items-start gap-2.5 mb-3">
+                  <Trash2
+                    size={15}
+                    style={{ color: "#FF3B30", flexShrink: 0, marginTop: 1 }}
+                  />
+                  <p
+                    className="text-sm leading-snug"
+                    style={{ color: "#FFB3B0" }}
+                  >
+                    This will delete{" "}
+                    <span className="font-bold text-white">
+                      ALL users, messages, and connections.
+                    </span>{" "}
+                    This cannot be undone.
+                  </p>
+                </div>
+
+                {clearError && (
+                  <motion.p
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-xs mb-3 px-1"
+                    style={{ color: "#FF6B6B" }}
+                    data-ocid="profile.error_state"
+                  >
+                    {clearError}
+                  </motion.p>
+                )}
+
+                <div className="flex gap-2">
+                  <PressableButton
+                    onClick={() => {
+                      setShowClearConfirm(false);
+                      setClearError(null);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      color: "#B0B0CC",
+                    }}
+                    data-ocid="profile.cancel_button"
+                  >
+                    Cancel
+                  </PressableButton>
+
+                  <PressableButton
+                    onClick={handleClearAllData}
+                    disabled={clearing}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5"
+                    style={{
+                      background: clearing
+                        ? "rgba(255,59,48,0.3)"
+                        : "rgba(255,59,48,0.85)",
+                      border: "none",
+                      color: "white",
+                      opacity: clearing ? 0.7 : 1,
+                    }}
+                    data-ocid="profile.confirm_button"
+                  >
+                    {clearing ? (
+                      <>
+                        <motion.span
+                          animate={{ opacity: [1, 0.4, 1] }}
+                          transition={{
+                            duration: 1,
+                            repeat: Number.POSITIVE_INFINITY,
+                          }}
+                        >
+                          Clearing...
+                        </motion.span>
+                      </>
+                    ) : (
+                      <>Yes, Delete Everything</>
+                    )}
+                  </PressableButton>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Friends list */}
