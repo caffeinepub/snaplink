@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useCamera } from "../camera/useCamera";
 import { useApp } from "../context/AppContext";
 import { getFriends, sendSnap } from "../store";
@@ -101,7 +102,6 @@ function SnapTimer({
   );
 }
 
-// Recording duration timer
 function RecordingTimer({ startTime }: { startTime: number }) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -133,7 +133,7 @@ function RecordingTimer({ startTime }: { startTime: number }) {
   );
 }
 
-// Bottom sheet friend selector
+// Rendered via portal so it always appears above everything
 function SendToSheet({
   friends,
   selectedFriends,
@@ -151,36 +151,39 @@ function SendToSheet({
   sending: boolean;
   sent: boolean;
 }) {
-  return (
-    // Backdrop
+  return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end"
-      style={{ background: "rgba(0,0,0,0.6)" }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "flex-end",
+        background: "rgba(0,0,0,0.65)",
+      }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      {/* Sheet */}
       <motion.div
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
         transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.38 }}
-        className="w-full"
         style={{
+          width: "100%",
           background: "#1A1F33",
           borderRadius: "24px 24px 0 0",
           border: "1px solid #2A3048",
           borderBottom: "none",
-          maxHeight: "75vh",
+          maxHeight: "80vh",
           display: "flex",
           flexDirection: "column",
         }}
         onClick={(e) => e.stopPropagation()}
-        data-ocid="camera.sheet"
       >
         {/* Handle */}
         <div className="flex justify-center pt-3 pb-1">
@@ -196,9 +199,8 @@ function SendToSheet({
           <button
             type="button"
             onClick={onClose}
-            className="w-9 h-9 rounded-full flex items-center justify-center transition-colors"
+            className="w-9 h-9 rounded-full flex items-center justify-center"
             style={{ background: "rgba(255,255,255,0.08)" }}
-            data-ocid="camera.close_button"
           >
             <X size={18} color="#B0B0CC" />
           </button>
@@ -212,12 +214,12 @@ function SendToSheet({
           {friends.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 gap-3">
               <p className="text-[#B0B0CC] text-sm text-center">
-                No friends yet. Connect with people first!
+                No friends yet. Add friends first to send snaps!
               </p>
             </div>
           ) : (
             <div className="flex flex-col gap-1">
-              {friends.map((friend, i) => {
+              {friends.map((friend) => {
                 const selected = selectedFriends.includes(friend.username);
                 return (
                   <motion.button
@@ -225,7 +227,7 @@ function SendToSheet({
                     key={friend.username}
                     whileTap={{ scale: 0.97 }}
                     onClick={() => onToggle(friend.username)}
-                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl transition-colors text-left"
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-left"
                     style={{
                       background: selected
                         ? "rgba(0,207,255,0.08)"
@@ -234,7 +236,6 @@ function SendToSheet({
                         ? "1px solid rgba(0,207,255,0.25)"
                         : "1px solid transparent",
                     }}
-                    data-ocid={`camera.toggle.${i + 1}`}
                   >
                     <UserAvatar
                       name={friend.displayName}
@@ -249,9 +250,8 @@ function SendToSheet({
                         @{friend.username}
                       </p>
                     </div>
-                    {/* Checkbox indicator */}
                     <div
-                      className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center transition-all"
+                      className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center"
                       style={{
                         background: selected
                           ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
@@ -333,7 +333,6 @@ function SendToSheet({
                       : "none",
                   opacity: selectedFriends.length === 0 ? 0.5 : 1,
                 }}
-                data-ocid="camera.submit_button"
               >
                 <Send size={18} />
                 {sending
@@ -348,7 +347,8 @@ function SendToSheet({
           </AnimatePresence>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
 
@@ -390,14 +390,13 @@ export function CameraTab() {
     isSupported,
   } = useCamera({ facingMode: "environment", quality: 0.85 });
 
-  // Load friends on user change
+  // Load friends whenever user changes or send sheet opens
   useEffect(() => {
     if (currentUser) {
       setFriends(getFriends(currentUser.username));
     }
   }, [currentUser]);
 
-  // Re-fetch friends every time the Send sheet opens to ensure fresh list
   useEffect(() => {
     if (showSendSheet && currentUser) {
       setFriends(getFriends(currentUser.username));
@@ -409,24 +408,22 @@ export function CameraTab() {
     startCamera();
     return () => {
       stopCamera();
-      // Revoke any video blob URL on unmount
-      if (capturedVideo) {
-        URL.revokeObjectURL(capturedVideo);
-      }
+      if (capturedVideo) URL.revokeObjectURL(capturedVideo);
     };
   }, []);
 
-  const handleCapture = async () => {
+  const handleCapture = useCallback(async () => {
     const file = await capturePhoto();
     if (!file) return;
     const reader = new FileReader();
     reader.onloadend = () => {
       setCapturedImage(reader.result as string);
+      setCapturedVideo(null);
       setCameraState("preview");
       stopCamera();
     };
     reader.readAsDataURL(file);
-  };
+  }, [capturePhoto, stopCamera]);
 
   const startRecording = useCallback(() => {
     const stream = videoRef.current?.srcObject as MediaStream | null;
@@ -442,9 +439,7 @@ export function CameraTab() {
     try {
       const recorder = new MediaRecorder(stream, { mimeType });
       recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          recordedChunksRef.current.push(e.data);
-        }
+        if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: mimeType });
@@ -474,27 +469,6 @@ export function CameraTab() {
     setRecordingStartTime(null);
   }, []);
 
-  const handlePointerUp = useCallback(() => {
-    const pressDuration = Date.now() - pressStartTimeRef.current;
-    if (isRecording) {
-      stopRecording();
-    } else if (pressDuration < 200) {
-      // Short press = photo
-      handleCapture();
-    } else {
-      // Long press but not yet recording (edge case: race condition)
-      handleCapture();
-    }
-    // biome-ignore lint/correctness/useExhaustiveDependencies: handleCapture is stable (uses refs internally)
-  }, [isRecording, stopRecording, handleCapture]);
-
-  const handlePointerLeave = useCallback(() => {
-    if (isRecording) {
-      stopRecording();
-    }
-  }, [isRecording, stopRecording]);
-
-  // Start recording after 200ms hold
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleButtonPointerDown = useCallback(() => {
@@ -509,16 +483,23 @@ export function CameraTab() {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
     }
-    handlePointerUp();
-  }, [handlePointerUp]);
+    const pressDuration = Date.now() - pressStartTimeRef.current;
+    if (isRecording) {
+      stopRecording();
+    } else if (pressDuration < 200) {
+      handleCapture();
+    } else {
+      handleCapture();
+    }
+  }, [isRecording, stopRecording, handleCapture]);
 
   const handleButtonPointerLeave = useCallback(() => {
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
     }
-    handlePointerLeave();
-  }, [handlePointerLeave]);
+    if (isRecording) stopRecording();
+  }, [isRecording, stopRecording]);
 
   const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -572,10 +553,7 @@ export function CameraTab() {
         setSent(false);
         setSending(false);
         setShowSendSheet(false);
-        // Revoke video blob URL
-        if (capturedVideo) {
-          URL.revokeObjectURL(capturedVideo);
-        }
+        if (capturedVideo) URL.revokeObjectURL(capturedVideo);
         setCapturedImage(null);
         setCapturedVideo(null);
         setCameraState("viewfinder");
@@ -595,9 +573,7 @@ export function CameraTab() {
   };
 
   const handleDiscard = () => {
-    if (capturedVideo) {
-      URL.revokeObjectURL(capturedVideo);
-    }
+    if (capturedVideo) URL.revokeObjectURL(capturedVideo);
     setCapturedImage(null);
     setCapturedVideo(null);
     setCameraState("viewfinder");
@@ -607,16 +583,13 @@ export function CameraTab() {
     startCamera();
   };
 
-  const handleNoExpiry = () => {};
-
   const isVideoSnap = !!capturedVideo;
 
   return (
     <div
-      className="relative flex flex-col h-full overflow-hidden"
+      className="relative flex flex-col h-full"
       style={{ background: "#000000" }}
     >
-      {/* Inject recording pulse animation */}
       <style>{`
         @keyframes pulse-rec {
           0%, 100% { opacity: 1; transform: scale(1); }
@@ -630,12 +603,13 @@ export function CameraTab() {
 
       <AnimatePresence mode="wait">
         {cameraState === "viewfinder" ? (
+          /* ─── VIEWFINDER ─── */
           <motion.div
             key="viewfinder"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="relative flex-1 flex flex-col"
+            className="absolute inset-0 flex flex-col"
           >
             <div className="relative flex-1 overflow-hidden">
               {isSupported === false ? (
@@ -717,7 +691,7 @@ export function CameraTab() {
                   />
                   {!isActive && !isLoading && (
                     <div
-                      className="w-full h-full flex items-center justify-center"
+                      className="w-full h-full"
                       style={{ background: "#0A0A1A" }}
                     />
                   )}
@@ -738,7 +712,7 @@ export function CameraTab() {
                 </>
               )}
 
-              {/* Recording overlay indicator */}
+              {/* Recording border */}
               <AnimatePresence>
                 {isRecording && (
                   <motion.div
@@ -766,7 +740,6 @@ export function CameraTab() {
                     background: "rgba(255,255,255,0.15)",
                     backdropFilter: "blur(8px)",
                   }}
-                  data-ocid="camera.toggle"
                 >
                   {flashOn ? (
                     <Zap size={20} color="#FFDD00" />
@@ -775,7 +748,6 @@ export function CameraTab() {
                   )}
                 </PressableButton>
 
-                {/* Recording timer or snap timer picker */}
                 {isRecording && recordingStartTime ? (
                   <RecordingTimer startTime={recordingStartTime} />
                 ) : (
@@ -787,7 +759,6 @@ export function CameraTab() {
                         background: "rgba(255,255,255,0.15)",
                         backdropFilter: "blur(8px)",
                       }}
-                      data-ocid="camera.toggle"
                     >
                       <Clock size={16} color="white" />
                       <span className="text-white text-sm font-semibold">
@@ -807,7 +778,6 @@ export function CameraTab() {
                             border: "1px solid #2A3048",
                             backdropFilter: "blur(12px)",
                           }}
-                          data-ocid="camera.popover"
                         >
                           {[3, 5, 10, 30].map((t) => (
                             <button
@@ -866,12 +836,11 @@ export function CameraTab() {
               >
                 <PressableButton
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center"
+                  className="w-12 h-12 rounded-xl flex items-center justify-center"
                   style={{
                     background: "rgba(255,255,255,0.15)",
                     backdropFilter: "blur(8px)",
                   }}
-                  data-ocid="camera.upload_button"
                 >
                   <Upload size={20} color="white" />
                 </PressableButton>
@@ -883,7 +852,7 @@ export function CameraTab() {
                   onChange={handleGalleryUpload}
                 />
 
-                {/* Capture button — tap for photo, hold for video */}
+                {/* Capture button */}
                 <button
                   type="button"
                   onPointerDown={handleButtonPointerDown}
@@ -893,11 +862,7 @@ export function CameraTab() {
                   className="w-20 h-20 rounded-full flex items-center justify-center select-none"
                   style={{
                     background: "transparent",
-                    border: `3px solid ${
-                      isRecording
-                        ? "rgba(255,59,59,0.9)"
-                        : "rgba(255,255,255,0.9)"
-                    }`,
+                    border: `3px solid ${isRecording ? "rgba(255,59,59,0.9)" : "rgba(255,255,255,0.9)"}`,
                     boxShadow: isRecording
                       ? "0 0 25px rgba(255,59,59,0.5), 0 0 60px rgba(255,59,59,0.2)"
                       : "0 0 25px rgba(0, 207, 255, 0.4), 0 0 60px rgba(0, 207, 255, 0.15)",
@@ -908,7 +873,6 @@ export function CameraTab() {
                     touchAction: "none",
                     userSelect: "none",
                   }}
-                  data-ocid="camera.primary_button"
                 >
                   <motion.div
                     animate={{
@@ -925,7 +889,6 @@ export function CameraTab() {
                   />
                 </button>
 
-                {/* Flip */}
                 <PressableButton
                   onClick={() => switchCamera()}
                   className="w-12 h-12 rounded-full flex items-center justify-center"
@@ -933,7 +896,6 @@ export function CameraTab() {
                     background: "rgba(255,255,255,0.15)",
                     backdropFilter: "blur(8px)",
                   }}
-                  data-ocid="camera.secondary_button"
                 >
                   <SwitchCamera size={20} color="white" />
                 </PressableButton>
@@ -941,16 +903,21 @@ export function CameraTab() {
             </div>
           </motion.div>
         ) : (
+          /* ─── PREVIEW ─── */
           <motion.div
             key="preview"
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.35 }}
-            className="flex-1 flex flex-col"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="absolute inset-0 flex flex-col"
+            style={{ background: "#000" }}
           >
-            <div className="relative flex-1 overflow-hidden">
-              {/* Video preview */}
+            {/* Media preview -- fills everything except the bottom panel */}
+            <div
+              className="relative flex-1 overflow-hidden"
+              style={{ minHeight: 0 }}
+            >
               {isVideoSnap && capturedVideo ? (
                 <video
                   src={capturedVideo}
@@ -968,11 +935,12 @@ export function CameraTab() {
                 />
               ) : null}
 
+              {/* Top bar */}
               <div
                 className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 pt-14 pb-4"
                 style={{
                   background:
-                    "linear-gradient(to bottom, rgba(0,0,0,0.5), transparent)",
+                    "linear-gradient(to bottom, rgba(0,0,0,0.55), transparent)",
                 }}
               >
                 <PressableButton
@@ -982,13 +950,11 @@ export function CameraTab() {
                     background: "rgba(0,0,0,0.4)",
                     backdropFilter: "blur(8px)",
                   }}
-                  data-ocid="camera.close_button"
                 >
                   <X size={20} color="white" />
                 </PressableButton>
 
-                {/* Video badge */}
-                {isVideoSnap && (
+                {isVideoSnap ? (
                   <div
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
                     style={{
@@ -1001,31 +967,23 @@ export function CameraTab() {
                       Video
                     </span>
                   </div>
-                )}
-
-                {!isVideoSnap && isEphemeral && (
-                  <SnapTimer
-                    duration={timerDuration}
-                    onExpire={handleNoExpiry}
-                  />
-                )}
+                ) : isEphemeral ? (
+                  <SnapTimer duration={timerDuration} onExpire={() => {}} />
+                ) : null}
               </div>
 
-              {/* Caption overlay display */}
+              {/* Caption overlay */}
               <AnimatePresence>
                 {snapCaption && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    className="absolute bottom-4 left-4 right-4 flex items-center gap-2"
+                    className="absolute bottom-4 left-4 right-4"
                   >
                     <div
-                      className="flex-1 text-center px-4 py-2 rounded-xl"
-                      style={{
-                        background: "rgba(0,0,0,0.7)",
-                        borderRadius: 12,
-                      }}
+                      className="text-center px-4 py-2 rounded-xl"
+                      style={{ background: "rgba(0,0,0,0.7)" }}
                     >
                       <p className="text-white font-semibold text-sm">
                         {snapCaption}
@@ -1036,128 +994,105 @@ export function CameraTab() {
               </AnimatePresence>
             </div>
 
-            {/* Preview bottom panel */}
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              transition={{
-                ease: [0.16, 1, 0.3, 1],
-                delay: 0.1,
-                duration: 0.35,
+            {/* ── Bottom action panel ── always fixed height, never scrolls away */}
+            <div
+              className="flex-shrink-0 flex flex-col gap-3 px-5 pt-4 pb-6"
+              style={{
+                background: "#1A1A2E",
+                borderTop: "1px solid #2A3048",
               }}
-              className="flex flex-col flex-none max-h-[55vh]"
-              style={{ background: "#1A1A2E", borderTop: "1px solid #2A3048" }}
             >
-              {/* Scrollable options area */}
-              <div className="px-5 pt-4 flex-1 min-h-0 overflow-y-auto">
-                {/* Caption input */}
-                <div className="mb-4">
-                  <div
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-2xl"
-                    style={{
-                      background: "rgba(255,255,255,0.06)",
-                      border: "1px solid rgba(255,255,255,0.1)",
-                    }}
+              {/* Caption input */}
+              <div
+                className="flex items-center gap-2 px-4 py-3 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <input
+                  type="text"
+                  placeholder="Add a caption..."
+                  value={snapCaption}
+                  onChange={(e) => setSnapCaption(e.target.value)}
+                  className="flex-1 bg-transparent text-white text-sm outline-none placeholder-[#B0B0CC]"
+                  maxLength={150}
+                />
+                {snapCaption && (
+                  <button
+                    type="button"
+                    onClick={() => setSnapCaption("")}
+                    className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                    style={{ background: "rgba(255,255,255,0.15)" }}
+                    aria-label="Clear caption"
                   >
-                    <input
-                      type="text"
-                      placeholder="Add a caption..."
-                      value={snapCaption}
-                      onChange={(e) => setSnapCaption(e.target.value)}
-                      className="flex-1 bg-transparent text-white text-sm outline-none placeholder-[#B0B0CC]"
-                      maxLength={150}
-                      data-ocid="camera.input"
-                    />
-                    {snapCaption && (
-                      <button
-                        type="button"
-                        onClick={() => setSnapCaption("")}
-                        className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
-                        style={{ background: "rgba(255,255,255,0.15)" }}
-                        aria-label="Clear caption"
-                      >
-                        <X size={11} color="white" />
-                      </button>
-                    )}
-                  </div>
-                </div>
+                    <X size={11} color="white" />
+                  </button>
+                )}
+              </div>
 
-                {/* AI Assistant button */}
+              {/* Row: AI Assistant + Ephemeral toggle */}
+              <div className="flex items-center gap-3">
                 <PressableButton
                   onClick={() => setShowAiAssistant(true)}
-                  className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-4"
+                  className="flex-1 py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2"
                   style={{
                     border: "1px solid rgba(0,207,255,0.4)",
                     background: "rgba(0,207,255,0.08)",
                     color: "#00CFFF",
                   }}
-                  data-ocid="camera.open_modal_button"
                 >
                   <Sparkles size={16} />
                   AI Assistant
                 </PressableButton>
 
-                {/* Ephemeral toggle (photo only) */}
                 {!isVideoSnap && (
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <p className="text-white font-semibold text-sm">
-                        Ephemeral snap
-                      </p>
-                      <p className="text-[#B0B0CC] text-xs mt-0.5">
-                        Disappears after {timerDuration}s
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsEphemeral((e) => !e)}
-                      className="w-12 h-6 rounded-full transition-all duration-300 relative"
+                  <button
+                    type="button"
+                    onClick={() => setIsEphemeral((e) => !e)}
+                    className="w-12 h-6 rounded-full transition-all duration-300 relative flex-shrink-0"
+                    style={{
+                      background: isEphemeral
+                        ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
+                        : "#2A3048",
+                    }}
+                    aria-label={`Ephemeral ${isEphemeral ? "on" : "off"}`}
+                  >
+                    <div
+                      className="absolute w-5 h-5 rounded-full top-0.5 transition-all duration-300"
                       style={{
-                        background: isEphemeral
-                          ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
-                          : "#2A3048",
+                        left: isEphemeral ? "calc(100% - 22px)" : "2px",
+                        background: "white",
                       }}
-                      aria-label={`Ephemeral mode ${isEphemeral ? "on" : "off"}`}
-                      data-ocid="camera.switch"
-                    >
-                      <div
-                        className="absolute w-5 h-5 rounded-full top-0.5 transition-all duration-300"
-                        style={{
-                          left: isEphemeral ? "calc(100% - 22px)" : "2px",
-                          background: "white",
-                        }}
-                      />
-                    </button>
-                  </div>
+                    />
+                  </button>
                 )}
               </div>
 
-              {/* Sticky Send To button */}
-              <div
-                className="px-5 pt-3 pb-6 flex-shrink-0"
-                style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
+              {/* Send To button -- always the last thing, always fully visible */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentUser) setFriends(getFriends(currentUser.username));
+                  setShowSendSheet(true);
+                }}
+                className="w-full py-4 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                style={{
+                  background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                  boxShadow: "0 0 30px rgba(0,207,255,0.35)",
+                }}
               >
-                <PressableButton
-                  onClick={() => setShowSendSheet(true)}
-                  className="w-full py-4 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2"
-                  style={{
-                    background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
-                    boxShadow: "0 0 25px rgba(0,207,255,0.3)",
-                  }}
-                  data-ocid="camera.secondary_button"
-                >
-                  <Send size={18} />
-                  {selectedFriends.length > 0
-                    ? `Send To... (${selectedFriends.length} selected)`
-                    : "Send To..."}
-                </PressableButton>
-              </div>
-            </motion.div>
+                <Send size={20} />
+                {selectedFriends.length > 0
+                  ? `Send To... (${selectedFriends.length} selected)`
+                  : "Send To..."}
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Send To bottom sheet */}
+      {/* Send To sheet -- rendered via portal to escape overflow clipping */}
       <AnimatePresence>
         {showSendSheet && (
           <SendToSheet
@@ -1172,7 +1107,7 @@ export function CameraTab() {
         )}
       </AnimatePresence>
 
-      {/* AI Snap Assistant sheet */}
+      {/* AI Snap Assistant -- also via portal */}
       <AnimatePresence>
         {showAiAssistant && (
           <AiSnapAssistant

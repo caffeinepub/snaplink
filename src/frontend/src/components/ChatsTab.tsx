@@ -6,6 +6,7 @@ import {
   Image,
   MessageCircle,
   Send,
+  X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,6 +17,7 @@ import {
   getUsers,
   markMessagesRead,
   sendMessage,
+  viewSnap,
 } from "../store";
 import type { ConversationSummary, Message } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
@@ -32,6 +34,243 @@ function formatTime(ts: number): string {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+// Wraps video element to allow biome suppression at component level
+function SnapVideo({
+  src,
+  videoRef,
+}: { src: string; videoRef: React.RefObject<HTMLVideoElement | null> }) {
+  return (
+    <video
+      ref={videoRef}
+      src={src}
+      controls
+      playsInline
+      loop
+      className="w-full rounded-2xl"
+      style={{ maxHeight: "70vh", objectFit: "contain" }}
+    >
+      <track kind="captions" />
+    </video>
+  );
+}
+
+// Full-screen snap viewer overlay
+function SnapViewer({
+  msg,
+  currentUsername,
+  onClose,
+  onViewed,
+}: {
+  msg: Message;
+  currentUsername: string;
+  onClose: () => void;
+  onViewed: () => void;
+}) {
+  const isReceived = msg.receiverId === currentUsername;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Mark as viewed when overlay opens
+  useEffect(() => {
+    if (isReceived && !msg.snapViewed) {
+      viewSnap(msg.id);
+      onViewed();
+    }
+  }, [msg.id, msg.snapViewed, isReceived, onViewed]);
+
+  // Auto-play video
+  useEffect(() => {
+    if (msg.isVideo && videoRef.current && msg.snapDataUrl) {
+      videoRef.current.play().catch(() => {});
+    }
+  }, [msg.isVideo, msg.snapDataUrl]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.95)" }}
+      onClick={onClose}
+    >
+      {/* Close button */}
+      <button
+        type="button"
+        className="absolute top-10 right-4 z-10 w-10 h-10 rounded-full flex items-center justify-center"
+        style={{ background: "rgba(255,255,255,0.15)" }}
+        onClick={onClose}
+      >
+        <X size={20} color="white" />
+      </button>
+
+      {/* Caption / sender label */}
+      <div className="absolute top-10 left-4 right-14">
+        <p className="text-white font-semibold text-sm">
+          {isReceived
+            ? `Snap from @${msg.senderId}`
+            : `Sent to @${msg.receiverId}`}
+        </p>
+        {msg.content &&
+          msg.content !== "\ud83d\udcf8 Sent a snap" &&
+          msg.content !== "\ud83c\udfa5 Sent a video snap" &&
+          msg.content !== "\ud83d\udcf7 Sent a photo" && (
+            <p className="text-[#B0B0CC] text-xs mt-0.5">{msg.content}</p>
+          )}
+      </div>
+
+      {/* Media - stop click propagation so tapping media doesn't close */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: overlay background closes on click; media area is interactive */}
+      <div
+        className="w-full max-w-sm px-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {msg.snapDataUrl ? (
+          msg.isVideo ? (
+            <SnapVideo src={msg.snapDataUrl} videoRef={videoRef} />
+          ) : (
+            <img
+              src={msg.snapDataUrl}
+              alt="snap"
+              className="w-full rounded-2xl"
+              style={{ maxHeight: "70vh", objectFit: "contain" }}
+            />
+          )
+        ) : (
+          <div
+            className="w-full h-64 rounded-2xl flex flex-col items-center justify-center gap-3"
+            style={{ background: "#1A1F33" }}
+          >
+            <Camera size={48} color="#B0B0CC" />
+            <p className="text-[#B0B0CC] text-sm text-center px-4">
+              {msg.isEphemeral
+                ? "This snap has already been viewed and disappeared."
+                : "Snap media unavailable."}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Tap anywhere to close hint */}
+      <p className="absolute bottom-8 text-[#B0B0CC] text-xs">
+        Tap anywhere to close
+      </p>
+    </motion.div>
+  );
+}
+
+// Snap bubble component for chat messages
+function SnapBubble({
+  msg,
+  isSent,
+  onOpenSnap,
+}: {
+  msg: Message;
+  isSent: boolean;
+  onOpenSnap: (msg: Message) => void;
+}) {
+  const isViewed = msg.snapViewed;
+  const isReceived = !isSent;
+
+  // Received snap: show "Tap to open" if not viewed, or "Opened" if viewed
+  if (isReceived) {
+    if (isViewed) {
+      return (
+        <div
+          className="flex items-center gap-2 px-4 py-3 rounded-2xl"
+          style={{ background: "#1A1F33", border: "1px solid #2A3048" }}
+        >
+          <Camera size={16} color="#B0B0CC" />
+          <span className="text-sm" style={{ color: "#B0B0CC" }}>
+            {msg.isVideo ? "Video opened" : "Snap opened"}
+          </span>
+        </div>
+      );
+    }
+    return (
+      <motion.button
+        type="button"
+        onClick={() => onOpenSnap(msg)}
+        whileTap={{ scale: 0.95 }}
+        className="flex items-center gap-2 px-4 py-3 rounded-2xl cursor-pointer"
+        style={{
+          background: "linear-gradient(135deg, #00CFFF22, #BD00FF22)",
+          border: "1.5px solid #00CFFF",
+        }}
+      >
+        <Camera size={16} color="#00CFFF" />
+        <span className="text-sm font-semibold" style={{ color: "#00CFFF" }}>
+          {msg.isVideo
+            ? "\ud83c\udfa5 Tap to open video"
+            : "\ud83d\udcf8 Tap to open snap"}
+        </span>
+      </motion.button>
+    );
+  }
+
+  // Sent snap: show preview thumbnail or sent label
+  return (
+    <button
+      type="button"
+      className="rounded-2xl overflow-hidden w-full text-left"
+      onClick={() => onOpenSnap(msg)}
+    >
+      {msg.snapDataUrl ? (
+        <div className="relative">
+          {msg.isVideo ? (
+            <div
+              className="flex items-center gap-2 px-4 py-3"
+              style={{
+                background: "linear-gradient(135deg, #00CFFF, #0099CC)",
+              }}
+            >
+              <Camera size={16} color="white" />
+              <span className="text-sm font-medium text-white">
+                {isViewed
+                  ? "\ud83c\udfa5 Video seen"
+                  : "\ud83c\udfa5 Video sent"}
+              </span>
+            </div>
+          ) : (
+            <div className="relative">
+              <img
+                src={msg.snapDataUrl}
+                alt="snap preview"
+                className="max-w-full rounded-2xl"
+                style={{ maxHeight: 160, objectFit: "cover", width: "100%" }}
+              />
+              <div
+                className="absolute bottom-0 left-0 right-0 px-3 py-2 rounded-b-2xl"
+                style={{ background: "rgba(0,0,0,0.5)" }}
+              >
+                <span className="text-xs text-white">
+                  {isViewed ? "\u2713 Seen" : "Sent"}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div
+          className="flex items-center gap-2 px-4 py-3"
+          style={{ background: "linear-gradient(135deg, #00CFFF, #0099CC)" }}
+        >
+          <Camera size={16} color="white" />
+          <span className="text-sm font-medium text-white">
+            {msg.isVideo
+              ? isViewed
+                ? "\ud83c\udfa5 Video seen"
+                : "\ud83c\udfa5 Video sent"
+              : isViewed
+                ? "\ud83d\udcf8 Snap seen"
+                : "\ud83d\udcf8 Snap sent"}
+          </span>
+        </div>
+      )}
+    </button>
+  );
 }
 
 function ConversationList({
@@ -54,7 +293,6 @@ function ConversationList({
     return () => clearInterval(interval);
   }, [refresh]);
 
-  // Get all users for avatar lookups
   const allUsers = getUsers();
 
   return (
@@ -154,9 +392,9 @@ function ChatView({
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
   const [sending, setSending] = useState(false);
+  const [viewingSnap, setViewingSnap] = useState<Message | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Look up friend's avatar
   const allUsers = getUsers();
   const friendUser = allUsers.find((u) => u.username === username);
 
@@ -174,7 +412,6 @@ function ChatView({
     return () => clearInterval(interval);
   }, [refresh]);
 
-  // Scroll to bottom when messages change
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional - scroll on message count change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -188,6 +425,15 @@ function ChatView({
     refresh();
     setSending(false);
   };
+
+  const handleOpenSnap = useCallback((msg: Message) => {
+    setViewingSnap(msg);
+  }, []);
+
+  const handleCloseSnap = useCallback(() => {
+    setViewingSnap(null);
+    refresh();
+  }, [refresh]);
 
   return (
     <div className="flex flex-col h-full" style={{ background: "#1A1A2E" }}>
@@ -228,7 +474,7 @@ function ChatView({
         {messages.length === 0 && (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-[#B0B0CC] text-sm">
-              Say hi to {displayName}! 👋
+              Say hi to {displayName}! \ud83d\udc4b
             </p>
           </div>
         )}
@@ -245,41 +491,11 @@ function ChatView({
             >
               <div style={{ maxWidth: "75%" }}>
                 {msg.isSnap ? (
-                  <div
-                    className={`rounded-2xl overflow-hidden ${
-                      isSent ? "" : "message-bubble-received"
-                    }`}
-                    style={
-                      isSent
-                        ? {
-                            background:
-                              "linear-gradient(135deg, #00CFFF, #0099CC)",
-                          }
-                        : {}
-                    }
-                  >
-                    {msg.snapDataUrl && !msg.isEphemeral ? (
-                      <img
-                        src={msg.snapDataUrl}
-                        alt="snap"
-                        className="max-w-full rounded-2xl"
-                        style={{ maxHeight: 200, objectFit: "cover" }}
-                      />
-                    ) : (
-                      <div className="flex items-center gap-2 px-4 py-3">
-                        <Camera
-                          size={16}
-                          color={isSent ? "white" : "#B0B0CC"}
-                        />
-                        <span
-                          className="text-sm font-medium"
-                          style={{ color: isSent ? "white" : "#B0B0CC" }}
-                        >
-                          {msg.content}
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                  <SnapBubble
+                    msg={msg}
+                    isSent={isSent}
+                    onOpenSnap={handleOpenSnap}
+                  />
                 ) : (
                   <div
                     className={`px-4 py-2.5 ${
@@ -359,6 +575,18 @@ function ChatView({
           <Send size={16} color="white" />
         </PressableButton>
       </div>
+
+      {/* Full-screen snap viewer */}
+      <AnimatePresence>
+        {viewingSnap && (
+          <SnapViewer
+            msg={viewingSnap}
+            currentUsername={currentUser?.username ?? ""}
+            onClose={handleCloseSnap}
+            onViewed={refresh}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -382,7 +610,6 @@ export function ChatsTab() {
           displayName: found.displayName,
         });
       } else {
-        // friend but no messages yet — look up from friends
         setConvDetails({
           username: selectedConversation,
           displayName: selectedConversation,

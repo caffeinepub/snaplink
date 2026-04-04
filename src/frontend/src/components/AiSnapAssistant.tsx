@@ -1,6 +1,7 @@
 import { Sparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import type { User } from "../types";
 import { UserAvatar } from "./Shared";
 
@@ -297,7 +298,7 @@ export function AiSnapAssistant({
     onSelectCaption(caption);
   };
 
-  return (
+  return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -649,6 +650,7 @@ export function AiSnapAssistant({
           </AnimatePresence>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
