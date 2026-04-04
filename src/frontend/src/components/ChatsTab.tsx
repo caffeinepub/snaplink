@@ -461,7 +461,6 @@ function ConversationList({
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
-
   const refresh = useCallback(async () => {
     if (!currentUser) return;
     try {
@@ -594,9 +593,10 @@ function ConversationList({
             return (
               <motion.div
                 key={conv.username}
+                layout
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05, ease: [0.16, 1, 0.3, 1] }}
+                transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.25 }}
                 onClick={() => onSelect(conv.username, conv.displayName)}
                 className="flex items-center gap-3 px-5 py-3.5 cursor-pointer active:bg-[#1A1F33] transition-colors"
                 style={{ borderBottom: "1px solid rgba(42,48,72,0.5)" }}
@@ -676,7 +676,6 @@ function ChatView({
     {},
   );
   const bottomRef = useRef<HTMLDivElement>(null);
-
   const refresh = useCallback(async () => {
     if (!currentUser) return;
     try {
@@ -716,15 +715,31 @@ function ChatView({
 
   const handleSend = async () => {
     if (!inputText.trim() || !currentUser || sending) return;
+    const text = inputText.trim();
     setSending(true);
+    setInputText(""); // clear immediately for snappy UX
+
+    // Optimistic update: show the message right away before backend confirms
+    const optimisticMsg: Message & { snapBlobId?: string } = {
+      id: `optimistic-${Date.now()}`,
+      senderId: currentUser.username,
+      receiverId: username,
+      content: text,
+      timestamp: Date.now(),
+      isRead: false,
+      isSnap: false,
+      isEphemeral: false,
+      snapViewed: false,
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+
     await backendSendMessage(
       currentUser.username,
       username,
-      inputText.trim(),
+      text,
       identity ?? undefined,
     );
-    setInputText("");
-    await refresh();
+    await refresh(); // replaces the optimistic message with the real one
     setSending(false);
   };
 

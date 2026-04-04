@@ -1,4 +1,12 @@
-import { Search, UserCheck, UserPlus, Users, X } from "lucide-react";
+import {
+  AlertCircle,
+  RefreshCw,
+  Search,
+  UserCheck,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -68,14 +76,18 @@ function UserStatusBadge({
 }
 
 // ─── Shared data loader ───────────────────────────────────────────────────────
-// Loads all users + friend/sent-request status purely from the backend
+// Loads all users + friend/sent-request status purely from the backend.
+// backendGetAllUsers now throws on failure so we can surface the error.
 
 async function loadUsersWithStatus(
   currentUsername: string,
   identity: any,
 ): Promise<UserWithStatus[]> {
-  const [profiles, friends, sentRequests] = await Promise.all([
-    backendGetAllUsers(),
+  // getAllUsers throws on failure — let the caller catch it
+  const profiles = await backendGetAllUsers();
+
+  // These two are best-effort; return [] on failure (don't block the list)
+  const [friends, sentRequests] = await Promise.all([
     backendGetFriends(currentUsername, identity),
     backendGetSentRequests(currentUsername, identity),
   ]);
@@ -97,21 +109,40 @@ async function loadUsersWithStatus(
     });
 }
 
-// ---- All People Section ─────────────────────────────────────────────────────
+// ─── Unified People Section ─────────────────────────────────────────────────────
 
-function AllPeopleSection() {
+function PeopleSection() {
   const { currentUser } = useApp();
   const { identity } = useInternetIdentity();
   const [users, setUsers] = useState<UserWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const loadAll = useCallback(async () => {
     if (!currentUser) return;
     try {
       const mapped = await loadUsersWithStatus(currentUser.username, identity);
       setUsers(mapped);
-    } catch {
-      setUsers([]);
+      setError(null);
+    } catch (e) {
+      const msg = String(e);
+      // If it's an infrastructure error, show a clean message
+      if (
+        msg.includes("stopped") ||
+        msg.includes("unavailable") ||
+        msg.includes("cycles") ||
+        msg.includes("fetch") ||
+        msg.includes("network") ||
+        msg.includes("503")
+      ) {
+        setError(
+          "Server is temporarily unavailable. Please try again in a moment.",
+        );
+      } else {
+        setError("Could not load users. Tap retry to try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -121,6 +152,12 @@ function AllPeopleSection() {
     loadAll();
     const interval = setInterval(loadAll, 5000);
     return () => clearInterval(interval);
+  }, [loadAll]);
+
+  const handleRetry = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    loadAll();
   }, [loadAll]);
 
   const handleAction = useCallback(
@@ -145,12 +182,22 @@ function AllPeopleSection() {
     [currentUser, identity, loadAll],
   );
 
+  const filteredUsers =
+    query.trim().length > 0
+      ? users.filter(
+          (u) =>
+            u.displayName.toLowerCase().includes(query.toLowerCase()) ||
+            u.username.toLowerCase().includes(query.toLowerCase()),
+        )
+      : users;
+
   return (
-    <div className="mt-6">
+    <div>
+      {/* Header row */}
       <div className="flex items-center gap-2 mb-4">
         <Users size={18} color="#BD00FF" />
-        <p className="text-white font-bold text-lg">All People</p>
-        {!loading && users.length > 0 && (
+        <p className="text-white font-bold text-lg">People</p>
+        {!loading && !error && users.length > 0 && (
           <span
             className="text-xs font-semibold px-2 py-0.5 rounded-full"
             style={{
@@ -164,140 +211,7 @@ function AllPeopleSection() {
         )}
       </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center py-8 gap-3">
-          <div
-            className="w-5 h-5 rounded-full border-2 animate-spin"
-            style={{ borderColor: "#BD00FF", borderTopColor: "transparent" }}
-          />
-          <p className="text-[#B0B0CC] text-sm">Loading users...</p>
-        </div>
-      ) : users.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-8 gap-2">
-          <Users size={28} color="#2A3048" />
-          <p className="text-[#B0B0CC] text-sm">No other users yet</p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {users.map((user, i) => (
-            <motion.div
-              key={user.username}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.02 }}
-              className="flex items-center gap-3 px-4 py-3 rounded-2xl"
-              style={{
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)",
-              }}
-            >
-              <UserAvatar
-                name={user.displayName}
-                size={46}
-                avatarUrl={user.avatarUrl}
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-white font-semibold text-sm truncate">
-                  {user.displayName}
-                </p>
-                <p className="text-[#B0B0CC] text-xs truncate">
-                  @{user.username}
-                </p>
-                {user.bio && (
-                  <p className="text-[#B0B0CC] text-xs mt-0.5 truncate">
-                    {user.bio.slice(0, 60)}
-                    {user.bio.length > 60 ? "..." : ""}
-                  </p>
-                )}
-              </div>
-              <div className="flex-shrink-0">
-                <UserStatusBadge user={user} onAction={handleAction} />
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---- Find People Section ─────────────────────────────────────────────────────
-
-function FindPeopleSection() {
-  const { currentUser } = useApp();
-  const { identity } = useInternetIdentity();
-  const [query, setQuery] = useState("");
-  const [allUsers, setAllUsers] = useState<UserWithStatus[]>([]);
-  const [loading, setLoading] = useState(true);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  const filteredUsers =
-    query.trim().length > 0
-      ? allUsers.filter(
-          (u) =>
-            u.displayName.toLowerCase().includes(query.toLowerCase()) ||
-            u.username.toLowerCase().includes(query.toLowerCase()),
-        )
-      : allUsers;
-
-  const loadAll = useCallback(async () => {
-    if (!currentUser) return;
-    try {
-      const mapped = await loadUsersWithStatus(currentUser.username, identity);
-      setAllUsers(mapped);
-    } catch {
-      setAllUsers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentUser, identity]);
-
-  useEffect(() => {
-    loadAll();
-    const interval = setInterval(loadAll, 5000);
-    return () => clearInterval(interval);
-  }, [loadAll]);
-
-  const handleAction = useCallback(
-    async (user: User, action: "add") => {
-      if (!currentUser || action !== "add") return;
-      // Optimistically update UI
-      setAllUsers((prev) =>
-        prev.map((u) =>
-          u.username === user.username
-            ? { ...u, connectionStatus: "pending_sent" as const }
-            : u,
-        ),
-      );
-      await backendSendConnectionRequest(
-        currentUser.username,
-        user.username,
-        identity,
-      );
-      setTimeout(loadAll, 500);
-    },
-    [currentUser, identity, loadAll],
-  );
-
-  return (
-    <div className="mt-6">
-      <div className="flex items-center gap-2 mb-4">
-        <Search size={18} color="#00CFFF" />
-        <p className="text-white font-bold text-lg">Find People</p>
-        {!loading && filteredUsers.length > 0 && (
-          <span
-            className="text-xs font-semibold px-2 py-0.5 rounded-full"
-            style={{
-              background: "rgba(0,207,255,0.10)",
-              border: "1px solid rgba(0,207,255,0.25)",
-              color: "#00CFFF",
-            }}
-          >
-            {filteredUsers.length}
-          </span>
-        )}
-      </div>
-
+      {/* Search filter */}
       <div
         className="relative mb-4"
         style={{
@@ -332,7 +246,7 @@ function FindPeopleSection() {
         )}
       </div>
 
-      {query.trim().length > 0 && (
+      {query.trim().length > 0 && !error && (
         <p className="text-[#B0B0CC] text-xs font-semibold uppercase tracking-wider mb-3 px-1">
           {filteredUsers.length} result{filteredUsers.length !== 1 ? "s" : ""}{" "}
           for &quot;{query}&quot;
@@ -347,52 +261,86 @@ function FindPeopleSection() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="flex items-center justify-center py-8 gap-3"
+            data-ocid="requests.loading_state"
           >
             <div
               className="w-5 h-5 rounded-full border-2 animate-spin"
-              style={{ borderColor: "#00CFFF", borderTopColor: "transparent" }}
+              style={{ borderColor: "#BD00FF", borderTopColor: "transparent" }}
             />
             <p className="text-[#B0B0CC] text-sm">Loading people...</p>
           </motion.div>
         )}
 
-        {!loading && filteredUsers.length === 0 && query.trim().length > 0 && (
+        {!loading && error && (
           <motion.div
-            key="no-results"
+            key="error"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="flex flex-col items-center justify-center py-8 gap-2"
+            className="flex flex-col items-center justify-center py-8 gap-3"
+            data-ocid="requests.error_state"
           >
-            <Search size={28} color="#2A3048" />
-            <p className="text-[#B0B0CC] text-sm">
-              No users found for &quot;{query}&quot;
-            </p>
+            <AlertCircle size={28} color="#FF4D6A" />
+            <p className="text-[#B0B0CC] text-sm text-center px-4">{error}</p>
+            <button
+              type="button"
+              onClick={handleRetry}
+              className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white"
+              style={{
+                background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                boxShadow: "0 0 12px rgba(0,207,255,0.25)",
+              }}
+            >
+              <RefreshCw size={14} />
+              Retry
+            </button>
           </motion.div>
         )}
 
-        {!loading && allUsers.length === 0 && query.trim().length === 0 && (
-          <motion.div
-            key="empty"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center justify-center py-8 gap-2"
-          >
-            <Users size={28} color="#2A3048" />
-            <p className="text-[#B0B0CC] text-sm">No other users yet</p>
-          </motion.div>
-        )}
+        {!loading &&
+          !error &&
+          filteredUsers.length === 0 &&
+          query.trim().length > 0 && (
+            <motion.div
+              key="no-results"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center justify-center py-8 gap-2"
+            >
+              <Search size={28} color="#2A3048" />
+              <p className="text-[#B0B0CC] text-sm">
+                No users found for &quot;{query}&quot;
+              </p>
+            </motion.div>
+          )}
 
-        {!loading && filteredUsers.length > 0 && (
+        {!loading &&
+          !error &&
+          users.length === 0 &&
+          query.trim().length === 0 && (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center justify-center py-8 gap-2"
+              data-ocid="requests.empty_state"
+            >
+              <Users size={28} color="#2A3048" />
+              <p className="text-[#B0B0CC] text-sm">No other users yet</p>
+            </motion.div>
+          )}
+
+        {!loading && !error && filteredUsers.length > 0 && (
           <div className="flex flex-col gap-2">
             {filteredUsers.map((user, i) => (
               <motion.div
                 key={user.username}
-                initial={{ opacity: 0, y: 8 }}
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                transition={{ delay: i * 0.02 }}
+                exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                transition={{ delay: i * 0.04 }}
                 className="flex items-center gap-3 px-4 py-3 rounded-2xl"
                 style={{
                   background: "rgba(255,255,255,0.03)",
@@ -442,12 +390,9 @@ export function RequestsTab() {
         <p className="text-[#B0B0CC] text-sm mt-1">Add people you know</p>
       </div>
 
-      <div className="px-5 flex flex-col gap-3">
-        <AllPeopleSection />
-        <FindPeopleSection />
+      <div className="px-5 pb-8">
+        <PeopleSection />
       </div>
-
-      <div className="h-8" />
     </div>
   );
 }

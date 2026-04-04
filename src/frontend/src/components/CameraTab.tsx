@@ -138,6 +138,26 @@ function RecordingTimer({ startTime }: { startTime: number }) {
   );
 }
 
+async function compressImage(
+  dataUrl: string,
+  maxWidth = 1200,
+  quality = 0.75,
+): Promise<Blob> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext("2d");
+      ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => resolve(blob!), "image/jpeg", quality);
+    };
+    img.src = dataUrl;
+  });
+}
+
 // Rendered via portal so it always appears above everything
 function SendToSheet({
   friends,
@@ -148,6 +168,7 @@ function SendToSheet({
   sending,
   sent,
   sendError,
+  uploadProgress,
 }: {
   friends: User[];
   selectedFriends: string[];
@@ -157,6 +178,7 @@ function SendToSheet({
   sending: boolean;
   sent: boolean;
   sendError?: string | null;
+  uploadProgress?: number;
 }) {
   return createPortal(
     <motion.div
@@ -364,7 +386,11 @@ function SendToSheet({
               >
                 <Send size={18} />
                 {sending
-                  ? "Uploading & Sending..."
+                  ? uploadProgress != null &&
+                    uploadProgress > 0 &&
+                    uploadProgress < 100
+                    ? `Uploading... ${uploadProgress}%`
+                    : "Sending..."
                   : selectedFriends.length === 0
                     ? "Select friends to send"
                     : `Send to ${selectedFriends.length} friend${
@@ -395,6 +421,7 @@ export function CameraTab() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [showSendSheet, setShowSendSheet] = useState(false);
   const [showAiAssistant, setShowAiAssistant] = useState(false);
   const [snapCaption, setSnapCaption] = useState("");
@@ -580,16 +607,18 @@ export function CameraTab() {
         const resp = await fetch(capturedVideo);
         mediaBlob = await resp.blob();
       } else if (capturedImage) {
-        // data: URL from photo capture — convert to Blob
-        const resp = await fetch(capturedImage);
-        mediaBlob = await resp.blob();
+        // Compress photo before upload to reduce payload and speed up transfer
+        mediaBlob = await compressImage(capturedImage);
       } else {
         setSending(false);
         return;
       }
 
-      // Upload the media to blob-storage, get a permanent hash
-      const uploadResult = await backendUploadSnapMedia(mediaBlob);
+      // Reset progress and upload the media to blob-storage, get a permanent hash
+      setUploadProgress(0);
+      const uploadResult = await backendUploadSnapMedia(mediaBlob, (pct) => {
+        setUploadProgress(pct);
+      });
       if ("err" in uploadResult) {
         setSendError(`Upload failed: ${uploadResult.err}`);
         setSending(false);
@@ -633,6 +662,7 @@ export function CameraTab() {
 
       setSent(true);
       setSending(false);
+      setUploadProgress(0);
       setTimeout(() => {
         setSent(false);
         setSendError(null);
@@ -1190,6 +1220,7 @@ export function CameraTab() {
             sending={sending}
             sent={sent}
             sendError={sendError}
+            uploadProgress={uploadProgress}
           />
         )}
       </AnimatePresence>

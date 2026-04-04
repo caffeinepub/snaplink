@@ -5,6 +5,8 @@
  * All authenticated calls pass callerUsername as the first argument
  * so both username/password AND Internet Identity users are handled
  * identically — no reliance on IC "caller" principal for auth.
+ *
+ * Actor instances are cached to avoid recreating HttpAgent on every call.
  */
 import type { Identity } from "@icp-sdk/core/agent";
 import { HttpAgent } from "@icp-sdk/core/agent";
@@ -14,8 +16,6 @@ import { StorageClient } from "./utils/StorageClient";
 
 // ─── Error sanitization ──────────────────────────────────────────────────────
 
-// Any error message containing one of these strings is an ICP infrastructure
-// error and should be replaced with a human-friendly message.
 const ICP_INFRASTRUCTURE_KEYWORDS = [
   "AgentHTTP",
   "Replica",
@@ -24,7 +24,6 @@ const ICP_INFRASTRUCTURE_KEYWORDS = [
   "NetworkError",
   "CBOR",
   "Could not decode",
-  // Canister lifecycle errors
   "is stopped",
   "canister is stopped",
   "canister stopped",
@@ -49,17 +48,14 @@ function sanitizeError(e: unknown): string {
   ) {
     return "Server is temporarily unavailable. Please try again in a moment.";
   }
-  // Extract human-readable part after the last ": "
   const colonIdx = msg.lastIndexOf(": ");
   if (colonIdx !== -1) {
     const extracted = msg.substring(colonIdx + 2).trim();
-    // Don't return raw JSON or error objects
     if (extracted.startsWith("{") || extracted.startsWith("[")) {
       return "Server is temporarily unavailable. Please try again in a moment.";
     }
     return extracted;
   }
-  // If the whole message looks like raw JSON, sanitize it
   if (msg.trim().startsWith("{") || msg.trim().startsWith("[")) {
     return "Server is temporarily unavailable. Please try again in a moment.";
   }
@@ -124,18 +120,64 @@ export function moRequestToFrontend(
   };
 }
 
-// ─── Actor factory ───────────────────────────────────────────────────────────
+// ─── Actor caching ────────────────────────────────────────────────────────────
+// We cache one anonymous actor and one per identity key to avoid
+// recreating HttpAgent on every backend call (major source of lag/errors).
 
-/** Anonymous actor for public queries (getAllUsers, searchUsers, login, register) */
+let _anonActorCache: any = null;
+const _identityActorCache = new Map<string, any>();
+
 async function anonActor(): Promise<any> {
-  return (await createActorWithConfig()) as any;
+  if (_anonActorCache) return _anonActorCache;
+  _anonActorCache = (await createActorWithConfig()) as any;
+  return _anonActorCache;
 }
 
-/** Authenticated actor. For II users passes the identity; for username/password
- *  users falls back to anonymous (the callerUsername param handles auth). */
 async function actor(identity?: Identity): Promise<any> {
   if (!identity) return anonActor();
-  return (await createActorWithConfig({ agentOptions: { identity } })) as any;
+  // Use the identity's principal text as a cache key
+  let key: string;
+  try {
+    key = identity.getPrincipal().toText();
+  } catch {
+    key = "__unknown__";
+  }
+  if (_identityActorCache.has(key)) return _identityActorCache.get(key);
+  const a = (await createActorWithConfig({
+    agentOptions: { identity },
+  })) as any;
+  _identityActorCache.set(key, a);
+  return a;
+}
+
+/** Call this after logout to flush cached actors */
+export function clearActorCache(): void {
+  _anonActorCache = null;
+  _identityActorCache.clear();
+  _storageClientCache = null;
+  _configCache = null;
+}
+
+// ─── StorageClient caching ────────────────────────────────────────────────────
+// Reuse one StorageClient across all uploads/downloads to avoid recreating
+// HttpAgent on every call (the main source of snap upload lag).
+
+let _storageClientCache: StorageClient | null = null;
+let _configCache: any = null;
+
+async function getStorageClient(): Promise<StorageClient> {
+  if (_storageClientCache) return _storageClientCache;
+  const config = _configCache ?? (await loadConfig());
+  _configCache = config;
+  const agent = new HttpAgent({ host: config.backend_host });
+  _storageClientCache = new StorageClient(
+    config.bucket_name,
+    config.storage_gateway_url,
+    config.backend_canister_id,
+    config.project_id,
+    agent,
+  );
+  return _storageClientCache;
 }
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
@@ -210,13 +252,12 @@ export async function backendSearchUsers(
   }
 }
 
+/**
+ * Returns all registered users. Throws on failure so callers can show an error.
+ */
 export async function backendGetAllUsers(): Promise<MotokoUserProfile[]> {
-  try {
-    const a = await anonActor();
-    return (await a.getAllUsers()) as MotokoUserProfile[];
-  } catch {
-    return [];
-  }
+  const a = await anonActor();
+  return (await a.getAllUsers()) as MotokoUserProfile[];
 }
 
 export async function backendGetProfile(
@@ -295,7 +336,7 @@ export async function backendRespondToRequest(
   }
 }
 
-/** Pending requests visible to this user (i.e. mutual — both sides sent one) */
+/** Pending requests visible to this user (mutual — both sides sent one) */
 export async function backendGetPendingRequests(
   callerUsername: string,
   identity?: Identity,
@@ -450,46 +491,26 @@ export async function backendGetConversations(
 
 // ─── Blob storage helpers ─────────────────────────────────────────────────────
 
-/** Build a StorageClient from the current config. */
-async function makeStorageClient(): Promise<StorageClient> {
-  const config = await loadConfig();
-  const agent = new HttpAgent({ host: config.backend_host });
-  return new StorageClient(
-    config.bucket_name,
-    config.storage_gateway_url,
-    config.backend_canister_id,
-    config.project_id,
-    agent,
-  );
-}
-
-/**
- * Upload a snap media Blob (photo or video) to blob-storage.
- * Returns the content-addressed hash on success.
- */
 export async function backendUploadSnapMedia(
   blob: Blob,
+  onProgress?: (percentage: number) => void,
 ): Promise<{ hash: string } | { err: string }> {
   try {
-    const client = await makeStorageClient();
+    const client = await getStorageClient();
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    const { hash } = await client.putFile(bytes);
+    const { hash } = await client.putFile(bytes, onProgress);
     return { hash };
   } catch (e) {
     return { err: sanitizeError(e) };
   }
 }
 
-/**
- * Returns a direct download URL for a previously-uploaded snap blobId (hash).
- * Returns null if the hash is missing or the call fails.
- */
 export async function backendGetSnapUrl(
   blobId: string,
 ): Promise<string | null> {
   if (!blobId) return null;
   try {
-    const client = await makeStorageClient();
+    const client = await getStorageClient();
     return await client.getDirectURL(blobId);
   } catch {
     return null;
@@ -498,7 +519,6 @@ export async function backendGetSnapUrl(
 
 // ─── Admin ───────────────────────────────────────────────────────────────────
 
-/** Wipes all users, messages, and connections from the canister. */
 export async function backendClearAllData(): Promise<
   { ok: null } | { err: string }
 > {

@@ -10,11 +10,14 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { backendClearAllData } from "../backendStore";
+import {
+  backendClearAllData,
+  backendGetConversations,
+  backendGetFriends,
+} from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
-  getFriends,
   getUserProfileCache,
   setCurrentUser as persistUser,
   setUserProfileCache,
@@ -24,11 +27,12 @@ import { PressableButton, UserAvatar } from "./Shared";
 
 export function ProfileTab() {
   const { currentUser, logout, refreshUser } = useApp();
-  const { clear: iiClear } = useInternetIdentity();
+  const { identity, clear: iiClear } = useInternetIdentity();
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
   const [friends, setFriends] = useState<User[]>([]);
+  const [conversationCount, setConversationCount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -43,9 +47,19 @@ export function ProfileTab() {
       setDisplayName(currentUser.displayName);
       setBio(currentUser.bio);
       setAvatarUrl(currentUser.avatarUrl);
-      setFriends(getFriends(currentUser.username));
     }
   }, [currentUser]);
+
+  // Load friends and conversations from backend
+  useEffect(() => {
+    if (!currentUser) return;
+    backendGetFriends(currentUser.username, identity ?? undefined)
+      .then(setFriends)
+      .catch(() => setFriends([]));
+    backendGetConversations(currentUser.username, identity ?? undefined)
+      .then((convs: any[]) => setConversationCount(convs.length))
+      .catch(() => setConversationCount(0));
+  }, [currentUser, identity]);
 
   const handleSave = () => {
     if (!currentUser) return;
@@ -322,7 +336,7 @@ export function ProfileTab() {
           <div className="flex items-center gap-1.5">
             <MessageCircle size={18} color="#BD00FF" />
             <span className="text-2xl font-bold text-white">
-              {friends.length}
+              {conversationCount}
             </span>
           </div>
           <p className="text-[#B0B0CC] text-xs">Conversations</p>
