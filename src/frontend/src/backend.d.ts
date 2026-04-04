@@ -25,6 +25,7 @@ export interface backendInterface {
     sendConnectionRequest(toUsername: string): Promise<{ ok: null } | { err: string }>;
     respondToRequest(requestId: string, accept: boolean): Promise<{ ok: null } | { err: string }>;
     getPendingRequests(): Promise<ConnectionRequest[]>;
+    getSentRequests(): Promise<ConnectionRequest[]>;
     getFriends(): Promise<UserProfile[]>;
     sendMessage(toUsername: string, content: string): Promise<{ ok: Message } | { err: string }>;
     sendSnap(toUsername: string, blobId: string, isEphemeral: boolean, saveToChat: boolean): Promise<{ ok: Message } | { err: string }>;

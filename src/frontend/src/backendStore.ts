@@ -222,6 +222,19 @@ export async function backendGetPendingRequests(
   }
 }
 
+// Returns outgoing pending requests sent BY the current user
+export async function backendGetSentRequests(
+  identity?: Identity,
+): Promise<ConnectionRequest[]> {
+  try {
+    const actor = await getAuthActor(identity);
+    const results: MotokoConnectionRequest[] = await actor.getSentRequests();
+    return results.map((r) => moRequestToFrontend(r));
+  } catch {
+    return [];
+  }
+}
+
 export async function backendGetFriends(identity?: Identity): Promise<User[]> {
   try {
     const actor = await getAuthActor(identity);

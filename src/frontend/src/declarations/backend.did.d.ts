@@ -58,9 +58,11 @@ export interface _SERVICE {
   getProfile: ActorMethod<[string], [] | [UserProfile]>;
   updateProfile: ActorMethod<[string, string], { ok: null } | { err: string }>;
   searchUsers: ActorMethod<[string], UserProfile[]>;
+  getAllUsers: ActorMethod<[], UserProfile[]>;
   sendConnectionRequest: ActorMethod<[string], { ok: null } | { err: string }>;
   respondToRequest: ActorMethod<[string, boolean], { ok: null } | { err: string }>;
   getPendingRequests: ActorMethod<[], ConnectionRequest[]>;
+  getSentRequests: ActorMethod<[], ConnectionRequest[]>;
   getFriends: ActorMethod<[], UserProfile[]>;
   sendMessage: ActorMethod<[string, string], { ok: Message } | { err: string }>;
   sendSnap: ActorMethod<[string, string, boolean, boolean], { ok: Message } | { err: string }>;

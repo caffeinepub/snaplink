@@ -275,6 +275,26 @@ actor SnapLink {
     };
   };
 
+  // Returns outgoing pending requests sent BY the caller (so frontend can show "Request Sent" badge)
+  public shared ({ caller }) func getSentRequests() : async [ConnectionRequest] {
+    let username = switch (getPrincipalUsername(caller)) {
+      case (null) return [];
+      case (?u) u;
+    };
+    var results : [ConnectionRequest] = [];
+    for ((_, req) in connectionRequests.entries()) {
+      switch (req.status) {
+        case (#pending) {
+          if (req.fromUser == username) {
+            results := results.concat([req]);
+          };
+        };
+        case (_) {};
+      };
+    };
+    results;
+  };
+
   // Returns only mutual pending requests (both sides sent) for display purposes.
   // In the new mutual system this is essentially unused for display since mutual
   // requests are auto-accepted, but kept for compatibility.
@@ -287,18 +307,12 @@ actor SnapLink {
     for ((_, req) in connectionRequests.entries()) {
       switch (req.status) {
         case (#pending) {
-          // Only surface a request if BOTH sides have sent (mutual pending)
-          // In practice this shouldn't occur anymore since sendConnectionRequest
-          // auto-accepts mutual requests, but handle edge cases gracefully.
           if (req.toUser == username) {
             switch (hasPendingRequest(username, req.fromUser)) {
               case (?_) {
-                // Mutual pending still exists (shouldn't happen normally)
                 results := results.concat([req]);
               };
-              case (null) {
-                // One-sided: recipient doesn't see it
-              };
+              case (null) {};
             };
           };
         };
@@ -453,8 +467,6 @@ actor SnapLink {
   };
 
   public shared ({ caller }) func getPendingRequestCount() : async Nat {
-    // In the mutual system, pending count is effectively 0 for the recipient
-    // (they can't see one-sided requests). Return 0 since counts no longer apply.
     let username = switch (getPrincipalUsername(caller)) {
       case (null) return 0;
       case (?u) u;
@@ -463,7 +475,6 @@ actor SnapLink {
     for ((_, req) in connectionRequests.entries()) {
       switch (req.status) {
         case (#pending) {
-          // Only count mutual pending (both sides sent) as visible
           if (req.toUser == username) {
             switch (hasPendingRequest(username, req.fromUser)) {
               case (?_) count += 1;
