@@ -8,15 +8,18 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { backendSearchUsers, moProfileToUser } from "../backendStore";
+import type { UserWithStatus as BackendUserWithStatus } from "../backendStore";
 import { useApp } from "../context/AppContext";
 import {
   getPendingRequests,
+  getRequests,
   respondToRequest,
   searchUsersWithStatus,
   sendConnectionRequest,
 } from "../store";
 import type { UserWithStatus } from "../store";
-import type { ConnectionRequest } from "../types";
+import type { ConnectionRequest, User } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
 
 function RequestCard({
@@ -100,10 +103,11 @@ function UserStatusBadge({
   user,
   onAction,
 }: {
-  user: UserWithStatus;
+  user: UserWithStatus | BackendUserWithStatus;
   onAction: (
-    user: UserWithStatus,
+    user: User,
     action: "add" | "accept" | "decline",
+    requestId?: string,
   ) => void;
 }) {
   if (user.connectionStatus === "friends") {
@@ -143,7 +147,7 @@ function UserStatusBadge({
         <motion.button
           type="button"
           whileTap={{ scale: 0.93 }}
-          onClick={() => onAction(user, "decline")}
+          onClick={() => onAction(user, "decline", user.requestId)}
           className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
           style={{
             background: "rgba(255,255,255,0.06)",
@@ -157,7 +161,7 @@ function UserStatusBadge({
         <motion.button
           type="button"
           whileTap={{ scale: 0.93 }}
-          onClick={() => onAction(user, "accept")}
+          onClick={() => onAction(user, "accept", user.requestId)}
           className="px-3 py-1.5 rounded-full text-xs font-bold text-white"
           style={{
             background: "rgba(0,207,255,0.15)",
@@ -194,50 +198,130 @@ function FindPeopleSection({
 }: { onRefreshPending: () => void }) {
   const { currentUser } = useApp();
   const [query, setQuery] = useState("");
-  const [users, setUsers] = useState<UserWithStatus[]>([]);
+  const [users, setUsers] = useState<
+    (UserWithStatus | BackendUserWithStatus)[]
+  >([]);
+  const [isSearching, setIsSearching] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef(false);
 
   const hasQuery = query.trim().length > 0;
 
-  const refresh = useCallback(() => {
-    if (!currentUser || !hasQuery) return;
-    const results = searchUsersWithStatus(query, currentUser);
-    setUsers(results);
-  }, [query, currentUser, hasQuery]);
+  const doSearch = useCallback(
+    async (q: string) => {
+      if (!currentUser || !q.trim()) return;
+      abortRef.current = false;
+      setIsSearching(true);
+      try {
+        // First try the canister search (shows users from all devices)
+        const profiles = await backendSearchUsers(q.trim());
+        if (abortRef.current) return;
 
-  // Run search whenever query changes
+        if (profiles.length > 0) {
+          const requests = getRequests();
+          const mapped: BackendUserWithStatus[] = profiles
+            .filter((p) => p.username !== currentUser.username)
+            .map((p) => {
+              const u = moProfileToUser(p);
+              const friendReq = requests.find(
+                (r) =>
+                  ((r.fromUser === currentUser.username &&
+                    r.toUser === u.username) ||
+                    (r.fromUser === u.username &&
+                      r.toUser === currentUser.username)) &&
+                  r.status === "accepted",
+              );
+              if (friendReq)
+                return {
+                  ...u,
+                  connectionStatus: "friends" as const,
+                  requestId: friendReq.id,
+                };
+
+              const sentReq = requests.find(
+                (r) =>
+                  r.fromUser === currentUser.username &&
+                  r.toUser === u.username &&
+                  r.status === "pending",
+              );
+              if (sentReq)
+                return {
+                  ...u,
+                  connectionStatus: "pending_sent" as const,
+                  requestId: sentReq.id,
+                };
+
+              const receivedReq = requests.find(
+                (r) =>
+                  r.fromUser === u.username &&
+                  r.toUser === currentUser.username &&
+                  r.status === "pending",
+              );
+              if (receivedReq)
+                return {
+                  ...u,
+                  connectionStatus: "pending_received" as const,
+                  requestId: receivedReq.id,
+                };
+
+              return { ...u, connectionStatus: "none" as const };
+            });
+          setUsers(mapped);
+        } else {
+          // Fallback to localStorage search
+          const localResults = searchUsersWithStatus(q, currentUser);
+          setUsers(localResults);
+        }
+      } catch {
+        // Fallback to localStorage on error
+        const localResults = searchUsersWithStatus(q, currentUser);
+        setUsers(localResults);
+      } finally {
+        setIsSearching(false);
+      }
+    },
+    [currentUser],
+  );
+
+  // Run search when query changes (debounced)
   useEffect(() => {
     if (!hasQuery) {
       setUsers([]);
       return;
     }
-    refresh();
-  }, [hasQuery, refresh]);
+    const timer = setTimeout(() => {
+      doSearch(query);
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      abortRef.current = true;
+    };
+  }, [query, hasQuery, doSearch]);
 
-  // Poll every 3 seconds only while a search query is active
+  // Poll every 4 seconds while search query is active
   useEffect(() => {
     if (!hasQuery) return;
-    const interval = setInterval(refresh, 3000);
+    const interval = setInterval(() => doSearch(query), 4000);
     return () => clearInterval(interval);
-  }, [hasQuery, refresh]);
+  }, [hasQuery, query, doSearch]);
 
   const handleAction = useCallback(
-    (user: UserWithStatus, action: "add" | "accept" | "decline") => {
+    (user: User, action: "add" | "accept" | "decline", requestId?: string) => {
       if (!currentUser) return;
 
       if (action === "add") {
         sendConnectionRequest(currentUser, user.username);
-      } else if (action === "accept" && user.requestId) {
-        respondToRequest(user.requestId, true);
+      } else if (action === "accept" && requestId) {
+        respondToRequest(requestId, true);
         onRefreshPending();
-      } else if (action === "decline" && user.requestId) {
-        respondToRequest(user.requestId, false);
+      } else if (action === "decline" && requestId) {
+        respondToRequest(requestId, false);
         onRefreshPending();
       }
-      // Refresh the list immediately
-      setTimeout(() => refresh(), 50);
+      // Refresh the list shortly after
+      setTimeout(() => doSearch(query), 100);
     },
-    [currentUser, refresh, onRefreshPending],
+    [currentUser, doSearch, query, onRefreshPending],
   );
 
   return (
@@ -326,8 +410,25 @@ function FindPeopleSection({
           </motion.div>
         )}
 
+        {/* Searching indicator */}
+        {hasQuery && isSearching && users.length === 0 && (
+          <motion.div
+            key="searching"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex flex-col items-center justify-center py-8 gap-2"
+          >
+            <div
+              className="w-6 h-6 rounded-full border-2 border-t-transparent animate-spin"
+              style={{ borderColor: "#00CFFF", borderTopColor: "transparent" }}
+            />
+            <p className="text-[#B0B0CC] text-sm">Searching...</p>
+          </motion.div>
+        )}
+
         {/* No results for active query */}
-        {hasQuery && users.length === 0 && (
+        {hasQuery && !isSearching && users.length === 0 && (
           <motion.div
             key="no-results"
             initial={{ opacity: 0, y: 8 }}
@@ -347,7 +448,7 @@ function FindPeopleSection({
           <div className="flex flex-col gap-2">
             {users.map((user, i) => (
               <motion.div
-                key={user.id}
+                key={user.username}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8, scale: 0.96 }}

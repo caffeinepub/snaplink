@@ -20,6 +20,7 @@ const USERS_KEY = "snaplink_users";
 const REQUESTS_KEY = "snaplink_requests";
 const MESSAGES_KEY = "snaplink_messages";
 const SESSION_KEY = "snaplink_session";
+const PROFILE_CACHE_KEY = "snaplink_profile_cache";
 
 export function getUsers(): User[] {
   try {
@@ -57,17 +58,54 @@ export function saveMessages(messages: Message[]): void {
   localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages));
 }
 
+// ─── Profile cache (avatarUrl + local overrides) ─────────────────────────────
+
+export function getUserProfileCache(): Record<string, Partial<User>> {
+  try {
+    return JSON.parse(localStorage.getItem(PROFILE_CACHE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+export function setUserProfileCache(
+  username: string,
+  data: Partial<User>,
+): void {
+  const cache = getUserProfileCache();
+  cache[username] = { ...cache[username], ...data };
+  localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(cache));
+}
+
+export function mergeWithCache(user: User): User {
+  const cache = getUserProfileCache();
+  const cached = cache[user.username];
+  if (!cached) return user;
+  return { ...user, ...cached };
+}
+
+// ─── Session ─────────────────────────────────────────────────────────────────
+
 export function getCurrentUser(): User | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    const session = JSON.parse(raw) as { userId: string; expiry: number };
+    const session = JSON.parse(raw) as {
+      userId: string;
+      expiry: number;
+      user?: User;
+    };
     if (Date.now() > session.expiry) {
       localStorage.removeItem(SESSION_KEY);
       return null;
     }
+    // Prefer stored user object (for backend-authed users) over local lookup
+    if (session.user) {
+      return mergeWithCache(session.user);
+    }
     const users = getUsers();
-    return users.find((u) => u.id === session.userId) ?? null;
+    const found = users.find((u) => u.id === session.userId);
+    return found ? mergeWithCache(found) : null;
   } catch {
     return null;
   }
@@ -80,10 +118,13 @@ export function setCurrentUser(user: User | null): void {
   }
   const session = {
     userId: user.id,
+    user,
     expiry: Date.now() + 30 * 24 * 60 * 60 * 1000,
   };
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
+
+// ─── Legacy local auth (kept for fallback) ───────────────────────────────────
 
 export function registerUser(
   username: string,
@@ -150,6 +191,7 @@ export function updateUserProfile(
   bio: string,
   avatarUrl?: string,
 ): void {
+  // Update local users list
   const users = getUsers();
   const idx = users.findIndex((u) => u.id === userId);
   if (idx !== -1) {
@@ -159,6 +201,28 @@ export function updateUserProfile(
       users[idx].avatarUrl = avatarUrl;
     }
     saveUsers(users);
+  }
+
+  // Also update the profile cache by username
+  const allUsers = getUsers();
+  const foundUser = allUsers.find((u) => u.id === userId);
+  const username = foundUser?.username;
+  if (username) {
+    const cacheData: Partial<User> = { displayName, bio };
+    if (avatarUrl !== undefined) cacheData.avatarUrl = avatarUrl;
+    setUserProfileCache(username, cacheData);
+  }
+
+  // Also update current session user if it matches
+  const currentUser = getCurrentUser();
+  if (currentUser && currentUser.id === userId) {
+    const updated: User = {
+      ...currentUser,
+      displayName,
+      bio,
+      ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+    };
+    setCurrentUser(updated);
   }
 }
 
@@ -256,7 +320,29 @@ export function sendConnectionRequest(
 ): { ok: null } | { err: string } {
   const users = getUsers();
   const toUser = users.find((u) => u.username === toUsername);
-  if (!toUser) return { err: "User not found" };
+  // Allow sending request even if user isn't in local store (they might be canister-only)
+  if (!toUser) {
+    // Create a placeholder in local store
+    const requests = getRequests();
+    const existing = requests.find(
+      (r) =>
+        r.fromUser === fromUser.username &&
+        r.toUser === toUsername &&
+        r.status === "pending",
+    );
+    if (existing) return { err: "Request already sent" };
+    requests.push({
+      id: crypto.randomUUID(),
+      fromUser: fromUser.username,
+      fromDisplayName: fromUser.displayName,
+      fromAvatarUrl: fromUser.avatarUrl,
+      toUser: toUsername,
+      status: "pending",
+      createdAt: Date.now(),
+    });
+    saveRequests(requests);
+    return { ok: null };
+  }
   const requests = getRequests();
   const existing = requests.find(
     (r) =>

@@ -5,6 +5,7 @@ import {
   CheckCheck,
   Image,
   MessageCircle,
+  Search,
   Send,
   X,
 } from "lucide-react";
@@ -288,6 +289,7 @@ function ConversationList({
 }) {
   const { currentUser } = useApp();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const refresh = useCallback(() => {
     if (currentUser) {
@@ -303,11 +305,55 @@ function ConversationList({
 
   const allUsers = getUsers();
 
+  const filtered = conversations.filter(
+    (c) =>
+      !searchQuery.trim() ||
+      c.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.username.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
+
   return (
     <div className="flex flex-col h-full" style={{ background: "#1A1A2E" }}>
       <div className="px-5 pt-12 pb-4">
         <h1 className="text-2xl font-bold text-white">Chats</h1>
       </div>
+
+      {/* Search bar — only shown when there are conversations */}
+      {conversations.length > 0 && (
+        <div className="px-5 pb-3">
+          <div
+            className="relative"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              borderRadius: 16,
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+          >
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2"
+              color="#B0B0CC"
+            />
+            <input
+              className="w-full bg-transparent text-white text-sm pl-9 pr-8 py-2.5 outline-none placeholder-[#B0B0CC]"
+              placeholder="Search chats..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              data-ocid="chats.search_input"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+                aria-label="Clear search"
+              >
+                <X size={12} color="#B0B0CC" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {conversations.length === 0 ? (
         <div
@@ -327,9 +373,16 @@ function ConversationList({
             </p>
           </div>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 px-8 text-center">
+          <Search size={32} color="#2A3048" />
+          <p className="text-[#B0B0CC] text-sm">
+            No chats matching &quot;{searchQuery}&quot;
+          </p>
+        </div>
       ) : (
         <div className="flex-1 overflow-y-auto scrollbar-hide">
-          {conversations.map((conv, i) => {
+          {filtered.map((conv, i) => {
             const friendUser = allUsers.find(
               (u) => u.username === conv.username,
             );

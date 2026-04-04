@@ -9,6 +9,7 @@
 import { Actor, HttpAgent, type HttpAgentOptions, type ActorConfig, type Agent, type ActorSubclass } from "@icp-sdk/core/agent";
 import type { Principal } from "@icp-sdk/core/principal";
 import { idlFactory, type _SERVICE } from "./declarations/backend.did";
+export type { UserProfile, ConnectionRequest, Message, ConversationEntry } from "./declarations/backend.did";
 export interface Some<T> {
     __kind__: "Some";
     value: T;
@@ -91,10 +92,124 @@ export class ExternalBlob {
 }
 export interface backendInterface {
     _initializeAccessControlWithSecret(secret: string): Promise<void>;
+    register(username: string, password: string, displayName: string): Promise<{ ok: any } | { err: string }>;
+    login(username: string, password: string): Promise<{ ok: any } | { err: string }>;
+    loginWithII(): Promise<{ ok: any } | { err: string }>;
+    registerWithII(username: string, displayName: string): Promise<{ ok: any } | { err: string }>;
+    getProfile(username: string): Promise<any[]>;
+    updateProfile(displayName: string, bio: string): Promise<{ ok: null } | { err: string }>;
+    searchUsers(q: string): Promise<any[]>;
+    sendConnectionRequest(toUsername: string): Promise<{ ok: null } | { err: string }>;
+    respondToRequest(requestId: string, accept: boolean): Promise<{ ok: null } | { err: string }>;
+    getPendingRequests(): Promise<any[]>;
+    getFriends(): Promise<any[]>;
+    sendMessage(toUsername: string, content: string): Promise<{ ok: any } | { err: string }>;
+    sendSnap(toUsername: string, blobId: string, isEphemeral: boolean, saveToChat: boolean): Promise<{ ok: any } | { err: string }>;
+    getMessages(withUsername: string, since: bigint): Promise<any[]>;
+    markMessageRead(messageId: string): Promise<{ ok: null } | { err: string }>;
+    viewSnap(messageId: string): Promise<{ ok: null } | { err: string }>;
+    getUnreadCount(): Promise<bigint>;
+    getPendingRequestCount(): Promise<bigint>;
+    getConversations(): Promise<any[]>;
 }
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
     async _initializeAccessControlWithSecret(_secret: string): Promise<void> {}
+    async register(username: string, password: string, displayName: string): Promise<{ ok: any } | { err: string }> {
+        try {
+            return await (this.actor as any).register(username, password, displayName);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async login(username: string, password: string): Promise<{ ok: any } | { err: string }> {
+        try {
+            return await (this.actor as any).login(username, password);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async loginWithII(): Promise<{ ok: any } | { err: string }> {
+        try {
+            return await (this.actor as any).loginWithII();
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async registerWithII(username: string, displayName: string): Promise<{ ok: any } | { err: string }> {
+        try {
+            return await (this.actor as any).registerWithII(username, displayName);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async getProfile(username: string): Promise<any[]> {
+        try {
+            return await (this.actor as any).getProfile(username);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async updateProfile(displayName: string, bio: string): Promise<{ ok: null } | { err: string }> {
+        try {
+            return await (this.actor as any).updateProfile(displayName, bio);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async searchUsers(q: string): Promise<any[]> {
+        try {
+            return await (this.actor as any).searchUsers(q);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async sendConnectionRequest(toUsername: string): Promise<{ ok: null } | { err: string }> {
+        try {
+            return await (this.actor as any).sendConnectionRequest(toUsername);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async respondToRequest(requestId: string, accept: boolean): Promise<{ ok: null } | { err: string }> {
+        try {
+            return await (this.actor as any).respondToRequest(requestId, accept);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async getPendingRequests(): Promise<any[]> {
+        try {
+            return await (this.actor as any).getPendingRequests();
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async getFriends(): Promise<any[]> {
+        try {
+            return await (this.actor as any).getFriends();
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async sendMessage(toUsername: string, content: string): Promise<{ ok: any } | { err: string }> {
+        try {
+            return await (this.actor as any).sendMessage(toUsername, content);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async sendSnap(toUsername: string, blobId: string, isEphemeral: boolean, saveToChat: boolean): Promise<{ ok: any } | { err: string }> {
+        try {
+            return await (this.actor as any).sendSnap(toUsername, blobId, isEphemeral, saveToChat);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async getMessages(withUsername: string, since: bigint): Promise<any[]> {
+        try {
+            return await (this.actor as any).getMessages(withUsername, since);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async markMessageRead(messageId: string): Promise<{ ok: null } | { err: string }> {
+        try {
+            return await (this.actor as any).markMessageRead(messageId);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async viewSnap(messageId: string): Promise<{ ok: null } | { err: string }> {
+        try {
+            return await (this.actor as any).viewSnap(messageId);
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async getUnreadCount(): Promise<bigint> {
+        try {
+            return await (this.actor as any).getUnreadCount();
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async getPendingRequestCount(): Promise<bigint> {
+        try {
+            return await (this.actor as any).getPendingRequestCount();
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
+    async getConversations(): Promise<any[]> {
+        try {
+            return await (this.actor as any).getConversations();
+        } catch(e) { if (this.processError) this.processError(e); throw e; }
+    }
 }
 export interface CreateActorOptions {
     agent?: Agent;

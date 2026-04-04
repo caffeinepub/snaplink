@@ -1,12 +1,17 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import {
+  backendLogin,
+  backendLoginWithII,
+  backendRegister,
+  backendRegisterWithII,
+} from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
   loginOrRegisterII,
-  loginUser,
+  mergeWithCache,
   setCurrentUser as persistUser,
-  registerUser,
 } from "../store";
 import { AnimatedLogo } from "./Logo";
 import { PressableButton } from "./Shared";
@@ -29,30 +34,32 @@ export function LoginScreen() {
     iiLogin();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
       if (tab === "login") {
-        const result = loginUser(username, password);
+        const result = await backendLogin(username, password);
         if ("err" in result) {
           setError(result.err);
         } else {
-          persistUser(result.ok);
-          setCurrentUser(result.ok);
+          const user = mergeWithCache(result.ok);
+          persistUser(user);
+          setCurrentUser(user);
         }
       } else {
         if (!displayName.trim()) {
           setError("Display name is required");
           return;
         }
-        const result = registerUser(username, password, displayName);
+        const result = await backendRegister(username, password, displayName);
         if ("err" in result) {
           setError(result.err);
         } else {
-          persistUser(result.ok);
-          setCurrentUser(result.ok);
+          const user = mergeWithCache(result.ok);
+          persistUser(user);
+          setCurrentUser(user);
         }
       }
     } finally {
@@ -69,9 +76,50 @@ export function LoginScreen() {
     ) {
       iiHandledRef.current = true;
       const principal = identity.getPrincipal().toString();
-      const user = loginOrRegisterII(principal);
-      persistUser(user);
-      setCurrentUser(user);
+
+      const handleII = async () => {
+        // Try login first
+        const loginResult = await backendLoginWithII(identity);
+        if ("ok" in loginResult) {
+          const user = mergeWithCache(loginResult.ok);
+          persistUser(user);
+          setCurrentUser(user);
+          return;
+        }
+        // No account yet — register automatically
+        const autoUsername = `ii_${principal.slice(0, 8)}`;
+        const autoDisplayName = `User ${principal.slice(0, 6)}`;
+        const registerResult = await backendRegisterWithII(
+          identity,
+          autoUsername,
+          autoDisplayName,
+        );
+        if ("ok" in registerResult) {
+          const user = mergeWithCache(registerResult.ok);
+          persistUser(user);
+          setCurrentUser(user);
+        } else {
+          // Username might already be taken — try with a longer suffix
+          const fallbackUsername = `ii_${principal.slice(0, 12)}`;
+          const fallbackResult = await backendRegisterWithII(
+            identity,
+            fallbackUsername,
+            autoDisplayName,
+          );
+          if ("ok" in fallbackResult) {
+            const user = mergeWithCache(fallbackResult.ok);
+            persistUser(user);
+            setCurrentUser(user);
+          }
+        }
+      };
+
+      handleII().catch(() => {
+        // If canister is unreachable, fall back to localStorage
+        const user = loginOrRegisterII(principal);
+        persistUser(user);
+        setCurrentUser(user);
+      });
     }
   }, [identity, setCurrentUser]);
 

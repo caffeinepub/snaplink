@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
 } from "react";
+import { backendSeedDemoAccounts } from "../backendStore";
 import { getCurrentUser, seedDemoData, setCurrentUser } from "../store";
 import type { Tab, User } from "../types";
 
@@ -30,9 +31,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   >(null);
 
   useEffect(() => {
+    // Seed localStorage demo data (sync, fast)
     seedDemoData();
     const user = getCurrentUser();
     setUser(user);
+
+    // Also seed demo accounts on the canister (async, fire-and-forget)
+    backendSeedDemoAccounts().catch(() => {
+      // Silently ignore — app works fine without canister demo accounts
+    });
   }, []);
 
   const handleSetCurrentUser = useCallback((user: User | null) => {
