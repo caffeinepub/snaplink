@@ -294,6 +294,8 @@ function SendToSheet({
                 key="sent"
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
                 className="w-full py-4 rounded-2xl flex items-center justify-center gap-2"
                 style={{
                   background: "linear-gradient(135deg, #00CFFF, #00AA88)",
@@ -306,15 +308,25 @@ function SendToSheet({
                   fill="none"
                   aria-hidden="true"
                 >
-                  <path
+                  <motion.path
                     d="M4 10l4.5 4.5L16 6"
                     stroke="white"
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
+                    initial={{ pathLength: 0 }}
+                    animate={{ pathLength: 1 }}
+                    transition={{ duration: 0.4, ease: "easeOut" }}
                   />
                 </svg>
-                <span className="text-white font-bold">Sent!</span>
+                <motion.span
+                  className="text-white font-bold"
+                  initial={{ opacity: 0, x: -4 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3, delay: 0.2 }}
+                >
+                  Sent!
+                </motion.span>
               </motion.div>
             ) : (
               <PressableButton
@@ -536,8 +548,10 @@ export function CameraTab() {
     if (!snapData) return;
     setSending(true);
     const isVideo = !!capturedVideo;
+    // Capture selectedFriends value before async reset
+    const recipientFriends = [...selectedFriends];
     try {
-      for (const friend of selectedFriends) {
+      for (const friend of recipientFriends) {
         sendSnap(
           currentUser,
           friend,
@@ -548,10 +562,11 @@ export function CameraTab() {
           isVideo,
         );
       }
+      // Clear sending immediately so AnimatePresence transitions cleanly to "Sent!" state
       setSent(true);
+      setSending(false);
       setTimeout(() => {
         setSent(false);
-        setSending(false);
         setShowSendSheet(false);
         if (capturedVideo) URL.revokeObjectURL(capturedVideo);
         setCapturedImage(null);
@@ -560,13 +575,13 @@ export function CameraTab() {
         setSelectedFriends([]);
         setSnapCaption("");
         startCamera();
-        if (selectedFriends.length === 1) {
-          setSelectedConversation(selectedFriends[0]);
+        if (recipientFriends.length === 1) {
+          setSelectedConversation(recipientFriends[0]);
           setActiveTab("chats");
         } else {
           setActiveTab("chats");
         }
-      }, 1200);
+      }, 1500);
     } catch {
       setSending(false);
     }
