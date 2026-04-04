@@ -82,6 +82,19 @@ actor SnapLink {
     usersByPrincipal.get(p.toText());
   };
 
+  // Resolve the caller's username.
+  // Priority: explicit callerUsername param (for username/password users) > II principal lookup
+  func resolveUsername(callerUsername : Text, caller : Principal) : ?Text {
+    if (callerUsername.size() > 0) {
+      // Validate that the user actually exists
+      switch (usersByUsername.get(callerUsername)) {
+        case (?_) return ?callerUsername;
+        case (null) return null;
+      };
+    };
+    getPrincipalUsername(caller);
+  };
+
   // Check if there's a pending request from user1 to user2
   func hasPendingRequest(fromUser : Text, toUser : Text) : ?ConnectionRequest {
     for ((_, req) in connectionRequests.entries()) {
@@ -167,17 +180,16 @@ actor SnapLink {
     usersByUsername.get(username);
   };
 
-  public shared ({ caller }) func updateProfile(displayName : Text, bio : Text) : async { #ok; #err : Text } {
-    switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func updateProfile(callerUsername : Text, displayName : Text, bio : Text) : async { #ok; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
-      case (?username) {
-        switch (usersByUsername.get(username)) {
-          case (null) return #err("User not found");
-          case (?profile) {
-            usersByUsername.add(username, { profile with displayName; bio });
-            #ok;
-          };
-        };
+      case (?u) u;
+    };
+    switch (usersByUsername.get(username)) {
+      case (null) return #err("User not found");
+      case (?profile) {
+        usersByUsername.add(username, { profile with displayName; bio });
+        #ok;
       };
     };
   };
@@ -205,8 +217,8 @@ actor SnapLink {
   // Mutual-interest friend system:
   // - Sending a request is invisible to the recipient until they ALSO send a request back
   // - When both sides have sent requests, the system auto-accepts both -> they become friends
-  public shared ({ caller }) func sendConnectionRequest(toUsername : Text) : async { #ok; #err : Text } {
-    let fromUsername = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func sendConnectionRequest(callerUsername : Text, toUsername : Text) : async { #ok; #err : Text } {
+    let fromUsername = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
     };
@@ -260,8 +272,8 @@ actor SnapLink {
     };
   };
 
-  public shared ({ caller }) func respondToRequest(requestId : Text, accept : Bool) : async { #ok; #err : Text } {
-    let username = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func respondToRequest(callerUsername : Text, requestId : Text, accept : Bool) : async { #ok; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
     };
@@ -276,8 +288,8 @@ actor SnapLink {
   };
 
   // Returns outgoing pending requests sent BY the caller (so frontend can show "Request Sent" badge)
-  public shared ({ caller }) func getSentRequests() : async [ConnectionRequest] {
-    let username = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func getSentRequests(callerUsername : Text) : async [ConnectionRequest] {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
     };
@@ -295,11 +307,10 @@ actor SnapLink {
     results;
   };
 
-  // Returns only mutual pending requests (both sides sent) for display purposes.
-  // In the new mutual system this is essentially unused for display since mutual
-  // requests are auto-accepted, but kept for compatibility.
-  public shared ({ caller }) func getPendingRequests() : async [ConnectionRequest] {
-    let username = switch (getPrincipalUsername(caller)) {
+  // Returns mutual pending requests visible to the current user for Accept/Decline.
+  // In the mutual system, a request is only visible to the recipient if they also sent one back.
+  public shared ({ caller }) func getPendingRequests(callerUsername : Text) : async [ConnectionRequest] {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
     };
@@ -322,11 +333,12 @@ actor SnapLink {
     results;
   };
 
-  public shared ({ caller }) func getFriends() : async [UserProfile] {
-    let username = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func getFriends(callerUsername : Text) : async [UserProfile] {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
     };
+    var seen : Map.Map<Text, Bool> = Map.empty<Text, Bool>();
     var results : [UserProfile] = [];
     for ((_, req) in connectionRequests.entries()) {
       switch (req.status) {
@@ -336,9 +348,15 @@ actor SnapLink {
             else if (req.toUser == username) req.fromUser
             else "";
           if (friendUsername != "") {
-            switch (usersByUsername.get(friendUsername)) {
-              case (?profile) results := results.concat([profile]);
-              case (null) {};
+            switch (seen.get(friendUsername)) {
+              case (?_) {}; // already added
+              case (null) {
+                seen.add(friendUsername, true);
+                switch (usersByUsername.get(friendUsername)) {
+                  case (?profile) results := results.concat([profile]);
+                  case (null) {};
+                };
+              };
             };
           };
         };
@@ -350,8 +368,8 @@ actor SnapLink {
 
   // ========== MESSAGING ==========
 
-  public shared ({ caller }) func sendMessage(toUsername : Text, content : Text) : async { #ok : Message; #err : Text } {
-    let fromUsername = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func sendMessage(callerUsername : Text, toUsername : Text, content : Text) : async { #ok : Message; #err : Text } {
+    let fromUsername = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
     };
@@ -374,8 +392,8 @@ actor SnapLink {
     #ok(msg);
   };
 
-  public shared ({ caller }) func sendSnap(toUsername : Text, blobId : Text, isEphemeral : Bool, saveToChat : Bool) : async { #ok : Message; #err : Text } {
-    let fromUsername = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func sendSnap(callerUsername : Text, toUsername : Text, blobId : Text, isEphemeral : Bool, saveToChat : Bool) : async { #ok : Message; #err : Text } {
+    let fromUsername = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
     };
@@ -399,8 +417,8 @@ actor SnapLink {
     #ok(msg);
   };
 
-  public shared ({ caller }) func getMessages(withUsername : Text, since : Int) : async [Message] {
-    let username = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func getMessages(callerUsername : Text, withUsername : Text, since : Int) : async [Message] {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
     };
@@ -422,8 +440,8 @@ actor SnapLink {
     });
   };
 
-  public shared ({ caller }) func markMessageRead(messageId : Text) : async { #ok; #err : Text } {
-    let username = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func markMessageRead(callerUsername : Text, messageId : Text) : async { #ok; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
     };
@@ -437,8 +455,8 @@ actor SnapLink {
     };
   };
 
-  public shared ({ caller }) func viewSnap(messageId : Text) : async { #ok; #err : Text } {
-    let username = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func viewSnap(callerUsername : Text, messageId : Text) : async { #ok; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
     };
@@ -452,8 +470,8 @@ actor SnapLink {
     };
   };
 
-  public shared ({ caller }) func getUnreadCount() : async Nat {
-    let username = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func getUnreadCount(callerUsername : Text) : async Nat {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return 0;
       case (?u) u;
     };
@@ -466,8 +484,8 @@ actor SnapLink {
     count;
   };
 
-  public shared ({ caller }) func getPendingRequestCount() : async Nat {
-    let username = switch (getPrincipalUsername(caller)) {
+  public shared ({ caller }) func getPendingRequestCount(callerUsername : Text) : async Nat {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return 0;
       case (?u) u;
     };
@@ -488,14 +506,14 @@ actor SnapLink {
     count;
   };
 
-  public shared ({ caller }) func getConversations() : async [{
+  public shared ({ caller }) func getConversations(callerUsername : Text) : async [{
     username : Text;
     displayName : Text;
     lastMessageContent : Text;
     lastMessageTimestamp : Int;
     unreadCount : Nat;
   }] {
-    let username = switch (getPrincipalUsername(caller)) {
+    let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
     };

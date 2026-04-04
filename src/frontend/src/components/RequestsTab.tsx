@@ -76,8 +76,8 @@ async function loadUsersWithStatus(
 ): Promise<UserWithStatus[]> {
   const [profiles, friends, sentRequests] = await Promise.all([
     backendGetAllUsers(),
-    backendGetFriends(identity),
-    backendGetSentRequests(identity),
+    backendGetFriends(currentUsername, identity),
+    backendGetSentRequests(currentUsername, identity),
   ]);
 
   const friendUsernames = new Set(friends.map((f) => f.username));
@@ -134,7 +134,11 @@ function AllPeopleSection() {
             : u,
         ),
       );
-      await backendSendConnectionRequest(user.username, identity);
+      await backendSendConnectionRequest(
+        currentUser.username,
+        user.username,
+        identity,
+      );
       // Refresh after a moment to sync real state
       setTimeout(loadAll, 500);
     },
@@ -265,7 +269,11 @@ function FindPeopleSection() {
             : u,
         ),
       );
-      await backendSendConnectionRequest(user.username, identity);
+      await backendSendConnectionRequest(
+        currentUser.username,
+        user.username,
+        identity,
+      );
       setTimeout(loadAll, 500);
     },
     [currentUser, identity, loadAll],

@@ -1,32 +1,35 @@
 # SnapLink
 
 ## Current State
-The Requests tab has three broken areas:
-1. **All users not showing**: `backendGetAllUsers()` calls `actor.getAllUsers()` but `getAllUsers` is missing from the IDL bindings (`backend.did.js` and `backend.did.d.ts`), so the call silently returns `[]`.
-2. **Search not working**: The Find People section loads from `backendGetAllUsers()` which also returns empty for the same reason.
-3. **Connection status wrong**: Both `AllPeopleSection` and `FindPeopleSection` determine friend/pending status from `getRequests()` (localStorage), but all connection requests go through the backend canister. localStorage has no record of backend requests, so every user shows as "none" (Add button) even if you already sent a request or are already friends.
-4. **Pending requests not shown**: `getPendingRequests` on the backend uses the mutual-only logic, but the frontend also checks localStorage for incoming requests — which is always empty since requests go through the canister.
+
+All auth-dependent canister methods (`getSentRequests`, `getFriends`, `getPendingRequests`, `sendConnectionRequest`, `getConversations`, `sendMessage`, `sendSnap`, `getMessages`, `markMessageRead`, `viewSnap`, `getUnreadCount`, `getPendingRequestCount`, `updateProfile`, `respondToRequest`) use `caller` (the IC principal) to identify the current user.
+
+Username/password users call with an anonymous principal because no identity is passed to the actor. This means `caller` is anonymous, all user lookups return null, and all authenticated calls silently return empty arrays or errors.
+
+Internet Identity users work because their II principal is stored in `usersByPrincipal` and is correctly resolved via `caller`.
 
 ## Requested Changes (Diff)
 
 ### Add
-- `getAllUsers` method to IDL bindings (`backend.did.js`, `backend.did.d.ts`)
-- `getSentRequests` backend method in `main.mo` — returns all pending requests sent BY the current user (so frontend can show "Request Sent" badge)
-- `getSentRequests` to IDL bindings and `backendStore.ts`
+- `callerUsername: Text` parameter to every auth-dependent backend method
+- A `verifyUser` helper in the backend that accepts `(callerUsername, principal)` and resolves the correct username: if `callerUsername` is non-empty and the user exists, use it; otherwise fall back to `getPrincipalUsername(caller)` for II users
+- `callerUsername` parameter to `backendStore.ts` wrapper functions so the frontend can pass the logged-in username
 
 ### Modify
-- `RequestsTab.tsx`: rewrite `AllPeopleSection` and `FindPeopleSection` to derive connection status purely from backend data:
-  - Friends: from `backendGetFriends(identity)`
-  - Sent requests: from new `backendGetSentRequests(identity)`
-  - Incoming mutual requests: from `backendGetPendingRequests(identity)` (these are mutual-only per the backend logic)
-  - Remove all localStorage (`getRequests()`, `saveRequests()`) usage from these sections
-- `backendStore.ts`: add `backendGetSentRequests()` function
+- All auth-dependent Motoko methods to use `verifyUser` instead of directly calling `getPrincipalUsername(caller)`
+- `backendStore.ts` functions to accept and forward `callerUsername` 
+- `RequestsTab.tsx` to pass `currentUser.username` to all backend calls
+- `ChatsTab.tsx` and any other component using backend calls to pass `currentUser.username`
+- IDL bindings (`backend.did.js` and `backend.did.d.ts`) to reflect new method signatures
 
 ### Remove
-- localStorage dependency for connection status in RequestsTab
+- Nothing
 
 ## Implementation Plan
-1. Add `getSentRequests` to `main.mo` — returns pending requests where `fromUser == caller`
-2. Add `getAllUsers` and `getSentRequests` to `backend.did.js` and `backend.did.d.ts`
-3. Add `backendGetSentRequests()` to `backendStore.ts`
-4. Rewrite `RequestsTab.tsx` to use backend-only status logic — no localStorage
+
+1. Update `main.mo`: add `callerUsername` param to `sendConnectionRequest`, `getSentRequests`, `getPendingRequests`, `getFriends`, `getConversations`, `sendMessage`, `sendSnap`, `getMessages`, `markMessageRead`, `viewSnap`, `getUnreadCount`, `getPendingRequestCount`, `updateProfile`, `respondToRequest`. Add `verifyUser` helper.
+2. Update `backend.did.js` and `backend.did.d.ts` IDL bindings to match new signatures.
+3. Update `backendStore.ts` wrapper functions to accept and pass `callerUsername`.
+4. Update `RequestsTab.tsx` to pass `currentUser.username`.
+5. Update `ChatsTab.tsx` and `ProfileTab.tsx` to pass `currentUser.username`.
+6. Validate (typecheck + build) and deploy.

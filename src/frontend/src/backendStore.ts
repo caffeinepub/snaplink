@@ -1,7 +1,8 @@
 /**
  * backendStore.ts
  * Wraps the ICP backend canister for async user/connection operations.
- * Falls back gracefully — never crashes the app.
+ * All auth-dependent calls pass callerUsername explicitly so both
+ * username/password users AND Internet Identity users work correctly.
  */
 import type { Identity } from "@icp-sdk/core/agent";
 import { createActorWithConfig } from "./config";
@@ -182,12 +183,16 @@ export type UserWithStatus = User & {
 // ─── Connection requests ─────────────────────────────────────────────────────
 
 export async function backendSendConnectionRequest(
+  callerUsername: string,
   toUsername: string,
   identity?: Identity,
 ): Promise<{ ok: null } | { err: string }> {
   try {
     const actor = await getAuthActor(identity);
-    const result = await actor.sendConnectionRequest(toUsername);
+    const result = await actor.sendConnectionRequest(
+      callerUsername,
+      toUsername,
+    );
     if ("ok" in result) return { ok: null };
     return { err: result.err };
   } catch (e) {
@@ -196,13 +201,18 @@ export async function backendSendConnectionRequest(
 }
 
 export async function backendRespondToRequest(
+  callerUsername: string,
   requestId: string,
   accept: boolean,
   identity?: Identity,
 ): Promise<{ ok: null } | { err: string }> {
   try {
     const actor = await getAuthActor(identity);
-    const result = await actor.respondToRequest(requestId, accept);
+    const result = await actor.respondToRequest(
+      callerUsername,
+      requestId,
+      accept,
+    );
     if ("ok" in result) return { ok: null };
     return { err: result.err };
   } catch (e) {
@@ -211,11 +221,13 @@ export async function backendRespondToRequest(
 }
 
 export async function backendGetPendingRequests(
+  callerUsername: string,
   identity?: Identity,
 ): Promise<ConnectionRequest[]> {
   try {
     const actor = await getAuthActor(identity);
-    const results: MotokoConnectionRequest[] = await actor.getPendingRequests();
+    const results: MotokoConnectionRequest[] =
+      await actor.getPendingRequests(callerUsername);
     return results.map((r) => moRequestToFrontend(r));
   } catch {
     return [];
@@ -224,24 +236,156 @@ export async function backendGetPendingRequests(
 
 // Returns outgoing pending requests sent BY the current user
 export async function backendGetSentRequests(
+  callerUsername: string,
   identity?: Identity,
 ): Promise<ConnectionRequest[]> {
   try {
     const actor = await getAuthActor(identity);
-    const results: MotokoConnectionRequest[] = await actor.getSentRequests();
+    const results: MotokoConnectionRequest[] =
+      await actor.getSentRequests(callerUsername);
     return results.map((r) => moRequestToFrontend(r));
   } catch {
     return [];
   }
 }
 
-export async function backendGetFriends(identity?: Identity): Promise<User[]> {
+export async function backendGetFriends(
+  callerUsername: string,
+  identity?: Identity,
+): Promise<User[]> {
   try {
     const actor = await getAuthActor(identity);
-    const results: MotokoUserProfile[] = await actor.getFriends();
+    const results: MotokoUserProfile[] = await actor.getFriends(callerUsername);
     return results.map(moProfileToUser);
   } catch {
     return [];
+  }
+}
+
+export async function backendGetMessages(
+  callerUsername: string,
+  withUsername: string,
+  since: number,
+  identity?: Identity,
+): Promise<any[]> {
+  try {
+    const actor = await getAuthActor(identity);
+    const results = await actor.getMessages(
+      callerUsername,
+      withUsername,
+      BigInt(since),
+    );
+    return results as any[];
+  } catch {
+    return [];
+  }
+}
+
+export async function backendSendMessage(
+  callerUsername: string,
+  toUsername: string,
+  content: string,
+  identity?: Identity,
+): Promise<{ ok: any } | { err: string }> {
+  try {
+    const actor = await getAuthActor(identity);
+    const result = await actor.sendMessage(callerUsername, toUsername, content);
+    if ("ok" in result) return { ok: result.ok };
+    return { err: result.err };
+  } catch (e) {
+    return { err: String(e) };
+  }
+}
+
+export async function backendSendSnap(
+  callerUsername: string,
+  toUsername: string,
+  blobId: string,
+  isEphemeral: boolean,
+  saveToChat: boolean,
+  identity?: Identity,
+): Promise<{ ok: any } | { err: string }> {
+  try {
+    const actor = await getAuthActor(identity);
+    const result = await actor.sendSnap(
+      callerUsername,
+      toUsername,
+      blobId,
+      isEphemeral,
+      saveToChat,
+    );
+    if ("ok" in result) return { ok: result.ok };
+    return { err: result.err };
+  } catch (e) {
+    return { err: String(e) };
+  }
+}
+
+export async function backendMarkMessageRead(
+  callerUsername: string,
+  messageId: string,
+  identity?: Identity,
+): Promise<void> {
+  try {
+    const actor = await getAuthActor(identity);
+    await actor.markMessageRead(callerUsername, messageId);
+  } catch {
+    // ignore
+  }
+}
+
+export async function backendViewSnap(
+  callerUsername: string,
+  messageId: string,
+  identity?: Identity,
+): Promise<void> {
+  try {
+    const actor = await getAuthActor(identity);
+    await actor.viewSnap(callerUsername, messageId);
+  } catch {
+    // ignore
+  }
+}
+
+export async function backendGetUnreadCount(
+  callerUsername: string,
+  identity?: Identity,
+): Promise<number> {
+  try {
+    const actor = await getAuthActor(identity);
+    const result = await actor.getUnreadCount(callerUsername);
+    return Number(result);
+  } catch {
+    return 0;
+  }
+}
+
+export async function backendGetConversations(
+  callerUsername: string,
+  identity?: Identity,
+): Promise<any[]> {
+  try {
+    const actor = await getAuthActor(identity);
+    const results = await actor.getConversations(callerUsername);
+    return results as any[];
+  } catch {
+    return [];
+  }
+}
+
+export async function backendUpdateProfile(
+  callerUsername: string,
+  displayName: string,
+  bio: string,
+  identity?: Identity,
+): Promise<{ ok: null } | { err: string }> {
+  try {
+    const actor = await getAuthActor(identity);
+    const result = await actor.updateProfile(callerUsername, displayName, bio);
+    if ("ok" in result) return { ok: null };
+    return { err: result.err };
+  } catch (e) {
+    return { err: String(e) };
   }
 }
 

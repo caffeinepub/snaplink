@@ -56,22 +56,22 @@ export interface _SERVICE {
   loginWithII: ActorMethod<[], { ok: UserProfile } | { err: string }>;
   registerWithII: ActorMethod<[string, string], { ok: UserProfile } | { err: string }>;
   getProfile: ActorMethod<[string], [] | [UserProfile]>;
-  updateProfile: ActorMethod<[string, string], { ok: null } | { err: string }>;
+  updateProfile: ActorMethod<[string, string, string], { ok: null } | { err: string }>;
   searchUsers: ActorMethod<[string], UserProfile[]>;
   getAllUsers: ActorMethod<[], UserProfile[]>;
-  sendConnectionRequest: ActorMethod<[string], { ok: null } | { err: string }>;
-  respondToRequest: ActorMethod<[string, boolean], { ok: null } | { err: string }>;
-  getPendingRequests: ActorMethod<[], ConnectionRequest[]>;
-  getSentRequests: ActorMethod<[], ConnectionRequest[]>;
-  getFriends: ActorMethod<[], UserProfile[]>;
-  sendMessage: ActorMethod<[string, string], { ok: Message } | { err: string }>;
-  sendSnap: ActorMethod<[string, string, boolean, boolean], { ok: Message } | { err: string }>;
-  getMessages: ActorMethod<[string, bigint], Message[]>;
-  markMessageRead: ActorMethod<[string], { ok: null } | { err: string }>;
-  viewSnap: ActorMethod<[string], { ok: null } | { err: string }>;
-  getUnreadCount: ActorMethod<[], bigint>;
-  getPendingRequestCount: ActorMethod<[], bigint>;
-  getConversations: ActorMethod<[], ConversationEntry[]>;
+  sendConnectionRequest: ActorMethod<[string, string], { ok: null } | { err: string }>;
+  respondToRequest: ActorMethod<[string, string, boolean], { ok: null } | { err: string }>;
+  getPendingRequests: ActorMethod<[string], ConnectionRequest[]>;
+  getSentRequests: ActorMethod<[string], ConnectionRequest[]>;
+  getFriends: ActorMethod<[string], UserProfile[]>;
+  sendMessage: ActorMethod<[string, string, string], { ok: Message } | { err: string }>;
+  sendSnap: ActorMethod<[string, string, string, boolean, boolean], { ok: Message } | { err: string }>;
+  getMessages: ActorMethod<[string, string, bigint], Message[]>;
+  markMessageRead: ActorMethod<[string, string], { ok: null } | { err: string }>;
+  viewSnap: ActorMethod<[string, string], { ok: null } | { err: string }>;
+  getUnreadCount: ActorMethod<[string], bigint>;
+  getPendingRequestCount: ActorMethod<[string], bigint>;
+  getConversations: ActorMethod<[string], ConversationEntry[]>;
 }
 
 export declare const idlService: IDL.ServiceClass;
