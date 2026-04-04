@@ -197,37 +197,29 @@ function FindPeopleSection({
   const [users, setUsers] = useState<UserWithStatus[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  const hasQuery = query.trim().length > 0;
+
   const refresh = useCallback(() => {
-    if (!currentUser) return;
+    if (!currentUser || !hasQuery) return;
     const results = searchUsersWithStatus(query, currentUser);
-    if (!query.trim()) {
-      // Show ALL users (including friends), sorted:
-      // pending_received first, then none, then pending_sent, then friends last
-      const order: Record<string, number> = {
-        pending_received: 0,
-        none: 1,
-        pending_sent: 2,
-        friends: 3,
-      };
-      const sorted = results.sort(
-        (a, b) =>
-          (order[a.connectionStatus] ?? 99) - (order[b.connectionStatus] ?? 99),
-      );
-      setUsers(sorted);
-    } else {
-      setUsers(results);
+    setUsers(results);
+  }, [query, currentUser, hasQuery]);
+
+  // Run search whenever query changes
+  useEffect(() => {
+    if (!hasQuery) {
+      setUsers([]);
+      return;
     }
-  }, [query, currentUser]);
-
-  useEffect(() => {
     refresh();
-  }, [refresh]);
+  }, [hasQuery, refresh]);
 
-  // Poll every 5 seconds so new sign-ups appear automatically
+  // Poll every 3 seconds only while a search query is active
   useEffect(() => {
-    const interval = setInterval(refresh, 5000);
+    if (!hasQuery) return;
+    const interval = setInterval(refresh, 3000);
     return () => clearInterval(interval);
-  }, [refresh]);
+  }, [hasQuery, refresh]);
 
   const handleAction = useCallback(
     (user: UserWithStatus, action: "add" | "accept" | "decline") => {
@@ -247,10 +239,6 @@ function FindPeopleSection({
     },
     [currentUser, refresh, onRefreshPending],
   );
-
-  const isEmptySearch = !query.trim();
-  // Only show "all connected" state if there are truly no other users in the system
-  const noOtherUsers = isEmptySearch && users.length === 0;
 
   return (
     <div className="mt-6">
@@ -295,48 +283,51 @@ function FindPeopleSection({
         )}
       </div>
 
-      {/* Section title */}
-      {!query.trim() && users.length > 0 && (
-        <p className="text-[#B0B0CC] text-xs font-semibold uppercase tracking-wider mb-3 px-1">
-          All People on SnapLink
-        </p>
-      )}
-      {query.trim() && users.length > 0 && (
+      {/* Result count label */}
+      {hasQuery && users.length > 0 && (
         <p className="text-[#B0B0CC] text-xs font-semibold uppercase tracking-wider mb-3 px-1">
           {users.length} result{users.length !== 1 ? "s" : ""} for &quot;{query}
           &quot;
         </p>
       )}
 
-      {/* User list */}
+      {/* Content area */}
       <AnimatePresence mode="popLayout">
-        {noOtherUsers ? (
+        {/* Empty state — no query typed yet */}
+        {!hasQuery && (
           <motion.div
-            key="all-connected"
+            key="search-prompt"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center justify-center py-10 gap-3"
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.25 }}
+            className="flex flex-col items-center justify-center py-10 gap-4"
             data-ocid="requests.empty_state"
           >
             <div
-              className="w-14 h-14 rounded-full flex items-center justify-center"
+              className="w-16 h-16 rounded-full flex items-center justify-center"
               style={{
                 background:
-                  "linear-gradient(135deg, rgba(0,207,255,0.15), rgba(189,0,255,0.15))",
-                border: "1px solid rgba(0,207,255,0.2)",
+                  "linear-gradient(135deg, rgba(0,207,255,0.12), rgba(189,0,255,0.12))",
+                border: "1px solid rgba(0,207,255,0.18)",
               }}
             >
-              <UserCheck size={24} color="#00CFFF" />
+              <Search size={26} color="#00CFFF" />
             </div>
-            <p className="text-white font-semibold text-sm">
-              No other users yet!
-            </p>
-            <p className="text-[#B0B0CC] text-xs text-center">
-              Be the first! Invite friends to join SnapLink 🎉
-            </p>
+            <div className="text-center px-4">
+              <p className="text-white font-semibold text-sm mb-1">
+                Find your people
+              </p>
+              <p className="text-[#B0B0CC] text-xs leading-relaxed">
+                Search by name or @username to find people and send friend
+                requests
+              </p>
+            </div>
           </motion.div>
-        ) : query.trim() && users.length === 0 ? (
+        )}
+
+        {/* No results for active query */}
+        {hasQuery && users.length === 0 && (
           <motion.div
             key="no-results"
             initial={{ opacity: 0, y: 8 }}
@@ -349,7 +340,10 @@ function FindPeopleSection({
               No users found for &quot;{query}&quot;
             </p>
           </motion.div>
-        ) : (
+        )}
+
+        {/* Search results */}
+        {hasQuery && users.length > 0 && (
           <div className="flex flex-col gap-2">
             {users.map((user, i) => (
               <motion.div

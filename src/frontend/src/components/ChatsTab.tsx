@@ -38,10 +38,24 @@ function formatTime(ts: number): string {
 
 // Wraps video element to allow biome suppression at component level
 // autoPlay + muted needed for mobile browser autoplay policy; we unmute after play starts
-function SnapVideo({
-  src,
-  videoRef,
-}: { src: string; videoRef: React.RefObject<HTMLVideoElement | null> }) {
+function SnapVideo({ src }: { src: string }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.load();
+    video
+      .play()
+      .then(() => {
+        // Unmute after playback starts to get audio
+        video.muted = false;
+      })
+      .catch(() => {
+        // If autoplay still fails, keep controls visible so user can tap play
+      });
+  }, []);
+
   return (
     // biome-ignore lint/a11y/useMediaCaption: snap video is user-generated content without captions
     <video
@@ -50,6 +64,7 @@ function SnapVideo({
       controls
       playsInline
       autoPlay
+      muted
       loop
       className="w-full rounded-2xl"
       style={{ maxHeight: "70vh", objectFit: "contain" }}
@@ -70,7 +85,6 @@ function SnapViewer({
   onViewed: () => void;
 }) {
   const isReceived = msg.receiverId === currentUsername;
-  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // Mark as viewed when overlay opens
   useEffect(() => {
@@ -79,24 +93,6 @@ function SnapViewer({
       onViewed();
     }
   }, [msg.id, msg.snapViewed, isReceived, onViewed]);
-
-  // Auto-play video with audio
-  // Mobile browsers require muted for autoplay; we start muted then unmute immediately
-  useEffect(() => {
-    const video = videoRef.current;
-    if (msg.isVideo && video && msg.snapDataUrl) {
-      video.muted = true;
-      video
-        .play()
-        .then(() => {
-          // Unmute after playback starts to get audio
-          video.muted = false;
-        })
-        .catch(() => {
-          // If autoplay still fails, keep controls visible so user can tap play
-        });
-    }
-  }, [msg.isVideo, msg.snapDataUrl]);
 
   return (
     <motion.div
@@ -141,7 +137,7 @@ function SnapViewer({
       >
         {msg.snapDataUrl ? (
           msg.isVideo ? (
-            <SnapVideo src={msg.snapDataUrl} videoRef={videoRef} />
+            <SnapVideo src={msg.snapDataUrl} />
           ) : (
             <img
               src={msg.snapDataUrl}

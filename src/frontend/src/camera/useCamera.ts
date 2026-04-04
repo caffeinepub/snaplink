@@ -71,8 +71,6 @@ export const useCamera = (config: CameraConfig = {}) => {
             width: { ideal: width },
             height: { ideal: height },
           },
-          // Include audio so video recordings capture sound
-          audio: true,
         };
 
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -86,30 +84,6 @@ export const useCamera = (config: CameraConfig = {}) => {
 
         return stream;
       } catch (err: any) {
-        // If audio permission is denied, fall back to video-only
-        if (err.name === "NotAllowedError" || err.name === "NotFoundError") {
-          try {
-            const videoOnlyConstraints = {
-              video: {
-                facingMode: facing,
-                width: { ideal: width },
-                height: { ideal: height },
-              },
-            };
-            const stream =
-              await navigator.mediaDevices.getUserMedia(videoOnlyConstraints);
-            if (!isMountedRef.current) {
-              for (const track of stream.getTracks()) {
-                track.stop();
-              }
-              return null;
-            }
-            return stream;
-          } catch {
-            // Fall through to error handling below with original err
-          }
-        }
-
         let errorType: CameraError["type"] = "unknown";
         let errorMessage = "Failed to access camera";
 
