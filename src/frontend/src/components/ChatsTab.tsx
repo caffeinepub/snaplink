@@ -13,16 +13,17 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { backendGetFriends } from "../backendStore";
+import {
+  backendGetConversations,
+  backendGetFriends,
+  backendGetMessages,
+  backendGetSnapUrl,
+  backendMarkMessageRead,
+  backendSendMessage,
+  backendViewSnap,
+} from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
-import {
-  getConversationMessages,
-  getConversations,
-  markMessagesRead,
-  sendMessage,
-  viewSnap,
-} from "../store";
 import type { ConversationSummary, Message, User } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
 
@@ -40,10 +41,43 @@ function formatTime(ts: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+/** Strip the "v:" / "p:" encoding prefix from a blobId to get the raw hash. */
+function decodeBlobId(blobId: string): { hash: string; isVideo: boolean } {
+  if (blobId.startsWith("v:")) return { hash: blobId.slice(2), isVideo: true };
+  if (blobId.startsWith("p:")) return { hash: blobId.slice(2), isVideo: false };
+  // Legacy or plain hashes — assume photo
+  return { hash: blobId, isVideo: false };
+}
+
+/** Map a raw backend message object to the frontend Message type. */
+function mapBackendMessage(msg: any): Message & { snapBlobId?: string } {
+  const blobIdRaw: string | undefined = msg.snapBlobId?.[0] ?? undefined;
+  const isVideo = blobIdRaw ? decodeBlobId(blobIdRaw).isVideo : false;
+  return {
+    id: String(msg.id),
+    senderId: String(msg.senderId),
+    receiverId: String(msg.receiverId),
+    content: String(msg.content ?? ""),
+    timestamp:
+      typeof msg.timestamp === "bigint"
+        ? Number(msg.timestamp) / 1_000_000
+        : Number(msg.timestamp ?? 0),
+    isRead: Boolean(msg.isRead),
+    isSnap: Boolean(msg.isSnap),
+    isEphemeral: Boolean(msg.isEphemeral),
+    snapViewed: Boolean(msg.snapViewed),
+    savedToChat: Boolean(msg.savedToChat),
+    isVideo,
+    snapBlobId: blobIdRaw,
+    snapDataUrl: undefined, // loaded lazily from blob-storage
+  };
+}
+
 // Wraps video element to allow biome suppression at component level
 function SnapVideo({ src }: { src: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: videoRef is a stable ref; src change handled by re-mounting
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -57,7 +91,6 @@ function SnapVideo({ src }: { src: string }) {
   }, []);
 
   return (
-    // biome-ignore lint/a11y/useMediaCaption: snap video is user-generated content without captions
     <video
       ref={videoRef}
       src={src}
@@ -74,23 +107,27 @@ function SnapVideo({ src }: { src: string }) {
 
 function SnapViewer({
   msg,
+  snapMediaUrl,
   currentUsername,
   onClose,
   onViewed,
 }: {
-  msg: Message;
+  msg: Message & { snapBlobId?: string };
+  snapMediaUrl?: string;
   currentUsername: string;
   onClose: () => void;
   onViewed: () => void;
 }) {
   const isReceived = msg.receiverId === currentUsername;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: msg.id is intentionally excluded; effect runs when snap state changes
   useEffect(() => {
     if (isReceived && !msg.snapViewed) {
-      viewSnap(msg.id);
       onViewed();
     }
-  }, [msg.id, msg.snapViewed, isReceived, onViewed]);
+  }, [msg.snapViewed, isReceived, onViewed]);
+
+  const mediaSrc = snapMediaUrl ?? msg.snapDataUrl;
 
   return (
     <motion.div
@@ -118,9 +155,9 @@ function SnapViewer({
             : `Sent to @${msg.receiverId}`}
         </p>
         {msg.content &&
-          msg.content !== "\ud83d\udcf8 Sent a snap" &&
-          msg.content !== "\ud83c\udfa5 Sent a video snap" &&
-          msg.content !== "\ud83d\udcf7 Sent a photo" && (
+          msg.content !== "📸 Sent a snap" &&
+          msg.content !== "📹 Sent a video snap" &&
+          msg.content !== "📷 Sent a photo" && (
             <p className="text-[#B0B0CC] text-xs mt-0.5">{msg.content}</p>
           )}
       </div>
@@ -130,12 +167,12 @@ function SnapViewer({
         className="w-full max-w-sm px-4"
         onClick={(e) => e.stopPropagation()}
       >
-        {msg.snapDataUrl ? (
+        {mediaSrc ? (
           msg.isVideo ? (
-            <SnapVideo src={msg.snapDataUrl} />
+            <SnapVideo src={mediaSrc} />
           ) : (
             <img
-              src={msg.snapDataUrl}
+              src={mediaSrc}
               alt="snap"
               className="w-full rounded-2xl"
               style={{ maxHeight: "70vh", objectFit: "contain" }}
@@ -166,10 +203,12 @@ function SnapViewer({
 function SnapBubble({
   msg,
   isSent,
+  snapMediaUrl,
   onOpenSnap,
 }: {
   msg: Message;
   isSent: boolean;
+  snapMediaUrl?: string;
   onOpenSnap: (msg: Message) => void;
 }) {
   const isViewed = msg.snapViewed;
@@ -202,13 +241,14 @@ function SnapBubble({
       >
         <Camera size={16} color="#00CFFF" />
         <span className="text-sm font-semibold" style={{ color: "#00CFFF" }}>
-          {msg.isVideo
-            ? "\ud83c\udfa5 Tap to open video"
-            : "\ud83d\udcf8 Tap to open snap"}
+          {msg.isVideo ? "🎥 Tap to open video" : "📸 Tap to open snap"}
         </span>
       </motion.button>
     );
   }
+
+  // Sent side
+  const previewSrc = snapMediaUrl ?? msg.snapDataUrl;
 
   return (
     <button
@@ -216,40 +256,22 @@ function SnapBubble({
       className="rounded-2xl overflow-hidden w-full text-left"
       onClick={() => onOpenSnap(msg)}
     >
-      {msg.snapDataUrl ? (
+      {previewSrc && !msg.isVideo ? (
         <div className="relative">
-          {msg.isVideo ? (
-            <div
-              className="flex items-center gap-2 px-4 py-3"
-              style={{
-                background: "linear-gradient(135deg, #00CFFF, #0099CC)",
-              }}
-            >
-              <Camera size={16} color="white" />
-              <span className="text-sm font-medium text-white">
-                {isViewed
-                  ? "\ud83c\udfa5 Video seen"
-                  : "\ud83c\udfa5 Video sent"}
-              </span>
-            </div>
-          ) : (
-            <div className="relative">
-              <img
-                src={msg.snapDataUrl}
-                alt="snap preview"
-                className="max-w-full rounded-2xl"
-                style={{ maxHeight: 160, objectFit: "cover", width: "100%" }}
-              />
-              <div
-                className="absolute bottom-0 left-0 right-0 px-3 py-2 rounded-b-2xl"
-                style={{ background: "rgba(0,0,0,0.5)" }}
-              >
-                <span className="text-xs text-white">
-                  {isViewed ? "\u2713 Seen" : "Sent"}
-                </span>
-              </div>
-            </div>
-          )}
+          <img
+            src={previewSrc}
+            alt="snap preview"
+            className="max-w-full rounded-2xl"
+            style={{ maxHeight: 160, objectFit: "cover", width: "100%" }}
+          />
+          <div
+            className="absolute bottom-0 left-0 right-0 px-3 py-2 rounded-b-2xl"
+            style={{ background: "rgba(0,0,0,0.5)" }}
+          >
+            <span className="text-xs text-white">
+              {isViewed ? "✓ Seen" : "Sent"}
+            </span>
+          </div>
         </div>
       ) : (
         <div
@@ -260,11 +282,11 @@ function SnapBubble({
           <span className="text-sm font-medium text-white">
             {msg.isVideo
               ? isViewed
-                ? "\ud83c\udfa5 Video seen"
-                : "\ud83c\udfa5 Video sent"
+                ? "🎥 Video seen"
+                : "🎥 Video sent"
               : isViewed
-                ? "\ud83d\udcf8 Snap seen"
-                : "\ud83d\udcf8 Snap sent"}
+                ? "📸 Snap seen"
+                : "📸 Snap sent"}
           </span>
         </div>
       )}
@@ -273,7 +295,6 @@ function SnapBubble({
 }
 
 // ─── New Chat Sheet ───────────────────────────────────────────────────────────
-// Slide-up sheet to pick a friend and start a chat
 
 function NewChatSheet({
   onSelect,
@@ -290,7 +311,7 @@ function NewChatSheet({
 
   useEffect(() => {
     if (!currentUser) return;
-    backendGetFriends(currentUser.username, identity)
+    backendGetFriends(currentUser.username, identity ?? undefined)
       .then(setFriends)
       .catch(() => setFriends([]))
       .finally(() => setLoading(false));
@@ -313,7 +334,6 @@ function NewChatSheet({
       style={{ background: "rgba(0,0,0,0.6)" }}
       onClick={onClose}
     >
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: sheet content stops propagation */}
       <motion.div
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
@@ -437,15 +457,34 @@ function ConversationList({
   onSelect: (username: string, displayName: string) => void;
 }) {
   const { currentUser } = useApp();
+  const { identity } = useInternetIdentity();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
 
-  const refresh = useCallback(() => {
-    if (currentUser) {
-      setConversations(getConversations(currentUser.username));
+  const refresh = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const raw = await backendGetConversations(
+        currentUser.username,
+        identity ?? undefined,
+      );
+      setConversations(
+        raw.map((c: any) => ({
+          username: String(c.username),
+          displayName: String(c.displayName),
+          lastMessageContent: String(c.lastMessageContent ?? ""),
+          lastMessageTimestamp:
+            typeof c.lastMessageTimestamp === "bigint"
+              ? Number(c.lastMessageTimestamp) / 1_000_000
+              : Number(c.lastMessageTimestamp ?? 0),
+          unreadCount: Number(c.unreadCount ?? 0),
+        })),
+      );
+    } catch {
+      // keep existing list
     }
-  }, [currentUser]);
+  }, [currentUser, identity]);
 
   useEffect(() => {
     refresh();
@@ -624,19 +663,45 @@ function ChatView({
   onCamera: () => void;
 }) {
   const { currentUser } = useApp();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const { identity } = useInternetIdentity();
+  const [messages, setMessages] = useState<
+    (Message & { snapBlobId?: string })[]
+  >([]);
   const [inputText, setInputText] = useState("");
   const [sending, setSending] = useState(false);
-  const [viewingSnap, setViewingSnap] = useState<Message | null>(null);
+  const [viewingSnap, setViewingSnap] = useState<
+    (Message & { snapBlobId?: string }) | null
+  >(null);
+  const [snapMediaUrls, setSnapMediaUrls] = useState<Record<string, string>>(
+    {},
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const refresh = useCallback(() => {
-    if (currentUser) {
-      const msgs = getConversationMessages(currentUser.username, username);
-      setMessages(msgs);
-      markMessagesRead(currentUser.username, username);
+  const refresh = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const rawMsgs = await backendGetMessages(
+        currentUser.username,
+        username,
+        0,
+        identity ?? undefined,
+      );
+      const mapped = rawMsgs.map(mapBackendMessage);
+      setMessages(mapped);
+      // Mark received messages as read
+      for (const msg of mapped) {
+        if (!msg.isRead && msg.receiverId === currentUser.username) {
+          backendMarkMessageRead(
+            currentUser.username,
+            msg.id,
+            identity ?? undefined,
+          ).catch(() => {});
+        }
+      }
+    } catch {
+      // keep existing messages
     }
-  }, [currentUser, username]);
+  }, [currentUser, username, identity]);
 
   useEffect(() => {
     refresh();
@@ -649,18 +714,43 @@ function ChatView({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!inputText.trim() || !currentUser || sending) return;
     setSending(true);
-    sendMessage(currentUser, username, inputText.trim());
+    await backendSendMessage(
+      currentUser.username,
+      username,
+      inputText.trim(),
+      identity ?? undefined,
+    );
     setInputText("");
-    refresh();
+    await refresh();
     setSending(false);
   };
 
-  const handleOpenSnap = useCallback((msg: Message) => {
-    setViewingSnap(msg);
-  }, []);
+  const handleOpenSnap = useCallback(
+    async (msg: Message & { snapBlobId?: string }) => {
+      setViewingSnap(msg);
+      // Load media URL from blob-storage if not already loaded
+      if (msg.snapBlobId && !snapMediaUrls[msg.id]) {
+        const { hash } = decodeBlobId(msg.snapBlobId);
+        const url = await backendGetSnapUrl(hash);
+        if (url) {
+          setSnapMediaUrls((prev) => ({ ...prev, [msg.id]: url }));
+        }
+      }
+      // Mark snap as viewed on backend
+      if (msg.receiverId === currentUser?.username && !msg.snapViewed) {
+        await backendViewSnap(
+          currentUser.username,
+          msg.id,
+          identity ?? undefined,
+        );
+        await refresh();
+      }
+    },
+    [currentUser, snapMediaUrls, identity, refresh],
+  );
 
   const handleCloseSnap = useCallback(() => {
     setViewingSnap(null);
@@ -702,7 +792,7 @@ function ChatView({
         {messages.length === 0 && (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-[#B0B0CC] text-sm">
-              Say hi to {displayName}! \ud83d\udc4b
+              Say hi to {displayName}! 👋
             </p>
           </div>
         )}
@@ -722,6 +812,7 @@ function ChatView({
                   <SnapBubble
                     msg={msg}
                     isSent={isSent}
+                    snapMediaUrl={snapMediaUrls[msg.id]}
                     onOpenSnap={handleOpenSnap}
                   />
                 ) : (
@@ -809,9 +900,17 @@ function ChatView({
         {viewingSnap && (
           <SnapViewer
             msg={viewingSnap}
+            snapMediaUrl={snapMediaUrls[viewingSnap.id]}
             currentUsername={currentUser?.username ?? ""}
             onClose={handleCloseSnap}
-            onViewed={refresh}
+            onViewed={() => {
+              backendViewSnap(
+                currentUser?.username ?? "",
+                viewingSnap.id,
+                identity ?? undefined,
+              ).catch(() => {});
+              refresh();
+            }}
           />
         )}
       </AnimatePresence>
@@ -825,6 +924,7 @@ export function ChatsTab() {
   const { selectedConversation, setSelectedConversation, setActiveTab } =
     useApp();
   const { currentUser } = useApp();
+  const { identity } = useInternetIdentity();
   const [convDetails, setConvDetails] = useState<{
     username: string;
     displayName: string;
@@ -841,17 +941,30 @@ export function ChatsTab() {
   useEffect(() => {
     if (selectedConversation && currentUser) {
       if (!convDetails || convDetails.username !== selectedConversation) {
-        const convs = getConversations(currentUser.username);
-        const found = convs.find((c) => c.username === selectedConversation);
-        setConvDetails({
-          username: selectedConversation,
-          displayName: found?.displayName ?? selectedConversation,
-        });
+        // Look up display name from backend conversations
+        backendGetConversations(currentUser.username, identity ?? undefined)
+          .then((convs: any[]) => {
+            const found = convs.find(
+              (c: any) => String(c.username) === selectedConversation,
+            );
+            setConvDetails({
+              username: selectedConversation,
+              displayName: found
+                ? String(found.displayName)
+                : selectedConversation,
+            });
+          })
+          .catch(() => {
+            setConvDetails({
+              username: selectedConversation,
+              displayName: selectedConversation,
+            });
+          });
       }
     } else {
       setConvDetails(null);
     }
-  }, [selectedConversation, currentUser, convDetails]);
+  }, [selectedConversation, currentUser, identity, convDetails]);
 
   const handleCameraFromChat = () => {
     setActiveTab("camera");

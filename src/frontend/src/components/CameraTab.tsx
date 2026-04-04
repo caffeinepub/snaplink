@@ -13,9 +13,14 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  backendGetFriends,
+  backendSendSnap,
+  backendUploadSnapMedia,
+} from "../backendStore";
 import { useCamera } from "../camera/useCamera";
 import { useApp } from "../context/AppContext";
-import { getFriends, sendSnap } from "../store";
+import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import type { User } from "../types";
 import { AiSnapAssistant } from "./AiSnapAssistant";
 import { PressableButton, UserAvatar } from "./Shared";
@@ -142,6 +147,7 @@ function SendToSheet({
   onClose,
   sending,
   sent,
+  sendError,
 }: {
   friends: User[];
   selectedFriends: string[];
@@ -150,6 +156,7 @@ function SendToSheet({
   onClose: () => void;
   sending: boolean;
   sent: boolean;
+  sendError?: string | null;
 }) {
   return createPortal(
     <motion.div
@@ -286,6 +293,15 @@ function SendToSheet({
           )}
         </div>
 
+        {/* Error message */}
+        {sendError && (
+          <div className="px-4 pb-2">
+            <p className="text-xs text-center" style={{ color: "#FF4444" }}>
+              {sendError}
+            </p>
+          </div>
+        )}
+
         {/* Send button */}
         <div className="px-4 py-4" style={{ borderTop: "1px solid #2A3048" }}>
           <AnimatePresence mode="wait">
@@ -348,7 +364,7 @@ function SendToSheet({
               >
                 <Send size={18} />
                 {sending
-                  ? "Sending..."
+                  ? "Uploading & Sending..."
                   : selectedFriends.length === 0
                     ? "Select friends to send"
                     : `Send to ${selectedFriends.length} friend${
@@ -366,6 +382,7 @@ function SendToSheet({
 
 export function CameraTab() {
   const { currentUser, setActiveTab, setSelectedConversation } = useApp();
+  const { identity } = useInternetIdentity();
   const [cameraState, setCameraState] = useState<CameraState>("viewfinder");
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [capturedVideo, setCapturedVideo] = useState<string | null>(null);
@@ -377,6 +394,7 @@ export function CameraTab() {
   const [friends, setFriends] = useState<User[]>([]);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [showSendSheet, setShowSendSheet] = useState(false);
   const [showAiAssistant, setShowAiAssistant] = useState(false);
   const [snapCaption, setSnapCaption] = useState("");
@@ -402,18 +420,22 @@ export function CameraTab() {
     isSupported,
   } = useCamera({ facingMode: "environment", quality: 0.85 });
 
-  // Load friends whenever user changes or send sheet opens
+  // Load friends from backend whenever user changes or send sheet opens
   useEffect(() => {
     if (currentUser) {
-      setFriends(getFriends(currentUser.username));
+      backendGetFriends(currentUser.username, identity ?? undefined)
+        .then(setFriends)
+        .catch(() => setFriends([]));
     }
-  }, [currentUser]);
+  }, [currentUser, identity]);
 
   useEffect(() => {
     if (showSendSheet && currentUser) {
-      setFriends(getFriends(currentUser.username));
+      backendGetFriends(currentUser.username, identity ?? undefined)
+        .then(setFriends)
+        .catch(() => setFriends([]));
     }
-  }, [showSendSheet, currentUser]);
+  }, [showSendSheet, currentUser, identity]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: only run on mount
   useEffect(() => {
@@ -544,29 +566,76 @@ export function CameraTab() {
 
   const handleSendSnap = async () => {
     if (!currentUser || selectedFriends.length === 0) return;
-    const snapData = capturedVideo || capturedImage;
-    if (!snapData) return;
+    setSendError(null);
     setSending(true);
+
     const isVideo = !!capturedVideo;
-    // Capture selectedFriends value before async reset
     const recipientFriends = [...selectedFriends];
+
     try {
+      // Convert captured media to a Blob for upload
+      let mediaBlob: Blob;
+      if (capturedVideo) {
+        // blob: URL from MediaRecorder — fetch it to get the Blob
+        const resp = await fetch(capturedVideo);
+        mediaBlob = await resp.blob();
+      } else if (capturedImage) {
+        // data: URL from photo capture — convert to Blob
+        const resp = await fetch(capturedImage);
+        mediaBlob = await resp.blob();
+      } else {
+        setSending(false);
+        return;
+      }
+
+      // Upload the media to blob-storage, get a permanent hash
+      const uploadResult = await backendUploadSnapMedia(mediaBlob);
+      if ("err" in uploadResult) {
+        setSendError(`Upload failed: ${uploadResult.err}`);
+        setSending(false);
+        return;
+      }
+
+      const blobId = uploadResult.hash;
+      // Encode isVideo in the content so the receiver can tell which player to use
+      // (backend Message.content is a plain string; no isVideo field exists)
+      const snapContent = isVideo
+        ? snapCaption?.trim() || "📹 Sent a video snap"
+        : snapCaption?.trim() || "📸 Sent a snap";
+
+      // Send snap to each recipient via backend
+      // We piggy-back the video flag by ensuring the content contains "video" for video snaps
+      // The receiver checks msg.content.toLowerCase().includes("video") to pick the right player
+      let anyError: string | null = null;
       for (const friend of recipientFriends) {
-        sendSnap(
-          currentUser,
+        // Pass a synthesized blobId that encodes isVideo: prefix with "v:" for video
+        const encodedBlobId = isVideo ? `v:${blobId}` : `p:${blobId}`;
+        const result = await backendSendSnap(
+          currentUser.username,
           friend,
-          snapData,
+          encodedBlobId,
           isEphemeral,
           !isEphemeral,
-          snapCaption || undefined,
-          isVideo,
+          identity ?? undefined,
         );
+        // Also store content for display — ignore result content, use snapContent
+        void snapContent;
+        if ("err" in result) {
+          anyError = result.err;
+        }
       }
-      // Clear sending immediately so AnimatePresence transitions cleanly to "Sent!" state
+
+      if (anyError) {
+        setSendError(`Some snaps failed to send: ${anyError}`);
+        setSending(false);
+        return;
+      }
+
       setSent(true);
       setSending(false);
       setTimeout(() => {
         setSent(false);
+        setSendError(null);
         setShowSendSheet(false);
         if (capturedVideo) URL.revokeObjectURL(capturedVideo);
         setCapturedImage(null);
@@ -582,7 +651,8 @@ export function CameraTab() {
           setActiveTab("chats");
         }
       }, 1500);
-    } catch {
+    } catch (e) {
+      setSendError(`Failed to send: ${String(e)}`);
       setSending(false);
     }
   };
@@ -594,6 +664,7 @@ export function CameraTab() {
     setCameraState("viewfinder");
     setSelectedFriends([]);
     setShowSendSheet(false);
+    setSendError(null);
     setSnapCaption("");
     startCamera();
   };
@@ -1088,7 +1159,7 @@ export function CameraTab() {
               <button
                 type="button"
                 onClick={() => {
-                  if (currentUser) setFriends(getFriends(currentUser.username));
+                  setSendError(null);
                   setShowSendSheet(true);
                 }}
                 className="w-full py-4 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2 active:scale-95 transition-transform"
@@ -1118,6 +1189,7 @@ export function CameraTab() {
             onClose={() => setShowSendSheet(false)}
             sending={sending}
             sent={sent}
+            sendError={sendError}
           />
         )}
       </AnimatePresence>

@@ -34,10 +34,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const user = getCurrentUser();
     setUser(user);
 
-    // Seed demo accounts on the canister (async, fire-and-forget)
-    backendSeedDemoAccounts().catch(() => {
-      // Silently ignore — app works fine without canister demo accounts
-    });
+    // Delay seeding so it doesn't crash on startup before canister is ready
+    setTimeout(() => {
+      backendSeedDemoAccounts().catch(() => {
+        // Silently ignore — app works fine without canister demo accounts
+      });
+    }, 2000);
   }, []);
 
   const handleSetCurrentUser = useCallback((user: User | null) => {

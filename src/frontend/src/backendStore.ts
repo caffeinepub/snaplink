@@ -7,8 +7,10 @@
  * identically — no reliance on IC "caller" principal for auth.
  */
 import type { Identity } from "@icp-sdk/core/agent";
-import { createActorWithConfig } from "./config";
+import { HttpAgent } from "@icp-sdk/core/agent";
+import { createActorWithConfig, loadConfig } from "./config";
 import type { ConnectionRequest, User } from "./types";
+import { StorageClient } from "./utils/StorageClient";
 
 // ─── Raw Motoko types ────────────────────────────────────────────────────────
 
@@ -389,6 +391,54 @@ export async function backendGetConversations(
     return (await a.getConversations(callerUsername)) as any[];
   } catch {
     return [];
+  }
+}
+
+// ─── Blob storage helpers ─────────────────────────────────────────────────────
+
+/** Build a StorageClient from the current config. */
+async function makeStorageClient(): Promise<StorageClient> {
+  const config = await loadConfig();
+  const agent = new HttpAgent({ host: config.backend_host });
+  return new StorageClient(
+    config.bucket_name,
+    config.storage_gateway_url,
+    config.backend_canister_id,
+    config.project_id,
+    agent,
+  );
+}
+
+/**
+ * Upload a snap media Blob (photo or video) to blob-storage.
+ * Returns the content-addressed hash on success.
+ */
+export async function backendUploadSnapMedia(
+  blob: Blob,
+): Promise<{ hash: string } | { err: string }> {
+  try {
+    const client = await makeStorageClient();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const { hash } = await client.putFile(bytes);
+    return { hash };
+  } catch (e) {
+    return { err: String(e) };
+  }
+}
+
+/**
+ * Returns a direct download URL for a previously-uploaded snap blobId (hash).
+ * Returns null if the hash is missing or the call fails.
+ */
+export async function backendGetSnapUrl(
+  blobId: string,
+): Promise<string | null> {
+  if (!blobId) return null;
+  try {
+    const client = await makeStorageClient();
+    return await client.getDirectURL(blobId);
+  } catch {
+    return null;
   }
 }
 
