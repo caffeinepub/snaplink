@@ -14,26 +14,54 @@ import { StorageClient } from "./utils/StorageClient";
 
 // ─── Error sanitization ──────────────────────────────────────────────────────
 
-const ICP_INTERNAL_KEYWORDS = [
+// Any error message containing one of these strings is an ICP infrastructure
+// error and should be replaced with a human-friendly message.
+const ICP_INFRASTRUCTURE_KEYWORDS = [
   "AgentHTTP",
   "Replica",
   "Certificate",
-  "fetch",
   "Failed to fetch",
   "NetworkError",
   "CBOR",
   "Could not decode",
+  // Canister lifecycle errors
+  "is stopped",
+  "canister is stopped",
+  "canister stopped",
+  "out of cycles",
+  "has been stopped",
+  "IC0504",
+  "IC0503",
+  "IC0302",
+  "IC0301",
+  "503",
+  "unavailable",
+  "Call failed to parse",
+  "body could not be parsed",
 ];
 
 function sanitizeError(e: unknown): string {
   const msg = String(e);
-  if (ICP_INTERNAL_KEYWORDS.some((kw) => msg.includes(kw))) {
-    return "Could not connect to server. Please try again.";
+  if (
+    ICP_INFRASTRUCTURE_KEYWORDS.some((kw) =>
+      msg.toLowerCase().includes(kw.toLowerCase()),
+    )
+  ) {
+    return "Server is temporarily unavailable. Please try again in a moment.";
   }
   // Extract human-readable part after the last ": "
   const colonIdx = msg.lastIndexOf(": ");
   if (colonIdx !== -1) {
-    return msg.substring(colonIdx + 2);
+    const extracted = msg.substring(colonIdx + 2).trim();
+    // Don't return raw JSON or error objects
+    if (extracted.startsWith("{") || extracted.startsWith("[")) {
+      return "Server is temporarily unavailable. Please try again in a moment.";
+    }
+    return extracted;
+  }
+  // If the whole message looks like raw JSON, sanitize it
+  if (msg.trim().startsWith("{") || msg.trim().startsWith("[")) {
+    return "Server is temporarily unavailable. Please try again in a moment.";
   }
   return msg;
 }
