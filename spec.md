@@ -1,24 +1,31 @@
 # SnapLink
 
 ## Current State
-- CameraTab has a preview panel with a "Send To..." bottom sheet (SendToSheet). Friends list is loaded once on mount via `useEffect`. The send sheet may show an empty friends list if loaded before friends data is ready, or if the list is stale.
-- RequestsTab/FindPeopleSection shows all non-friend users by default, filtered to hide `friends` status. Users who are already friends are not visible in Find People without searching.
+- Requests tab has an "All People" section that auto-loads all registered users
+- A "Find People" search section requires typing a query before showing results
+- Friend request system: sending a request creates a pending entry visible to the recipient immediately in their pending list
+- Backend stores connection requests in a Map; `getPendingRequests` returns all requests where `toUser == caller`
 
 ## Requested Changes (Diff)
 
 ### Add
-- Refresh friends list every time the Send To sheet is opened (not just on mount)
-- Show ALL registered users in Find People by default (no search required) — including friends, with a "Friends" badge, and new users who just signed up via any auth method
+- Mutual-interest friend system: two users become friends only when BOTH have independently sent each other a request
+- When User A sends a request to User B, User B does NOT see it as a pending request
+- When User B also sends a request to User A, the system detects the mutual interest and automatically accepts both into a friendship — both users then see each other as friends
+- The "Find People" section shows all users immediately without needing to type (same behavior as All People section)
 
 ### Modify
-- CameraTab: call `getFriends` fresh when `showSendSheet` becomes true, not just on mount
-- RequestsTab FindPeopleSection: remove the `friends` filter so all users appear, sorted as: pending_received first, then none, then pending_sent, then friends last
-- FindPeopleSection: section label changes from "People You May Know" to "All People" when no search query
+- Backend `sendConnectionRequest`: when a request is sent, check if a reverse pending request already exists from the target user; if yes, automatically accept both and set status to `accepted`
+- Backend `getPendingRequests`: only return requests where BOTH sides have sent to each other (i.e., mutual matches) — so a one-sided request is invisible to the receiver
+- Frontend `FindPeopleSection`: remove the gate that hides results when query is empty; show all users by default, filter when query is typed
+- Frontend `AllPeopleSection`: no change needed (already auto-loads)
+- Frontend connection status logic: reflect mutual-only pending logic (no more `pending_received` until mutual)
 
 ### Remove
-- Nothing removed
+- One-sided pending request visibility from the receiver's side
 
 ## Implementation Plan
-1. CameraTab: add a `useEffect` on `showSendSheet` that calls `getFriends` and updates the `friends` state whenever the sheet opens
-2. RequestsTab FindPeopleSection: change sort order to include friends (connectionStatus: 'friends' moves to end), remove `.filter(u => u.connectionStatus !== 'friends')` from the no-query branch so all users are shown
-3. Update the section label text to reflect showing all users
+1. Update `sendConnectionRequest` in `main.mo`: check for reverse request; if found, set both to `#accepted`; otherwise create `#pending` as before
+2. Update `getPendingRequests` in `main.mo`: only return requests that are `#pending` AND have a matching reverse `#pending` request (mutual matches only) — or keep returning accepted requests for the accepted state display
+3. Update `FindPeopleSection` in `RequestsTab.tsx`: load all users on mount (like AllPeopleSection does) and filter by query when present; no empty-state prompt
+4. Update connection status resolution in both sections: `pending_received` should only appear when there is a MUTUAL pending (both sides sent), which the backend now handles by auto-accepting

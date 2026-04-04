@@ -11,7 +11,13 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
-import { getFriends, updateUserProfile } from "../store";
+import {
+  getFriends,
+  getUserProfileCache,
+  mergeWithCache,
+  setCurrentUser as persistUser,
+  setUserProfileCache,
+} from "../store";
 import type { User } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
 
@@ -38,7 +44,18 @@ export function ProfileTab() {
   const handleSave = () => {
     if (!currentUser) return;
     setSaving(true);
-    updateUserProfile(currentUser.id, displayName, bio, avatarUrl);
+    // Update profile cache
+    const cacheData: Partial<User> = { displayName, bio };
+    if (avatarUrl !== undefined) cacheData.avatarUrl = avatarUrl;
+    setUserProfileCache(currentUser.username, cacheData);
+    // Update session with new values
+    const updated: User = {
+      ...currentUser,
+      displayName,
+      bio,
+      ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+    };
+    persistUser(updated);
     refreshUser();
     setSaving(false);
     setEditing(false);
@@ -57,13 +74,10 @@ export function ProfileTab() {
     reader.onloadend = () => {
       const dataUrl = reader.result as string;
       setAvatarUrl(dataUrl);
-      // immediately persist so it shows everywhere
-      updateUserProfile(
-        currentUser.id,
-        currentUser.displayName,
-        currentUser.bio,
-        dataUrl,
-      );
+      // Immediately persist so it shows everywhere
+      setUserProfileCache(currentUser.username, { avatarUrl: dataUrl });
+      const updated: User = { ...currentUser, avatarUrl: dataUrl };
+      persistUser(updated);
       refreshUser();
     };
     reader.readAsDataURL(file);
@@ -73,6 +87,10 @@ export function ProfileTab() {
 
   const nameId = "profile-display-name";
   const bioId = "profile-bio";
+
+  // Merge profile cache for display
+  const cache = getUserProfileCache();
+  const cachedAvatar = cache[currentUser.username]?.avatarUrl ?? avatarUrl;
 
   return (
     <div
@@ -156,7 +174,7 @@ export function ProfileTab() {
                 <UserAvatar
                   name={currentUser.displayName}
                   size={90}
-                  avatarUrl={avatarUrl}
+                  avatarUrl={cachedAvatar}
                 />
               </div>
             </div>

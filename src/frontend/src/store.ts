@@ -16,23 +16,10 @@ export function simpleHash(input: string): string {
   return Math.abs(hash).toString(36);
 }
 
-const USERS_KEY = "snaplink_users";
 const REQUESTS_KEY = "snaplink_requests";
 const MESSAGES_KEY = "snaplink_messages";
 const SESSION_KEY = "snaplink_session";
 const PROFILE_CACHE_KEY = "snaplink_profile_cache";
-
-export function getUsers(): User[] {
-  try {
-    return JSON.parse(localStorage.getItem(USERS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-export function saveUsers(users: User[]): void {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
 
 export function getRequests(): ConnectionRequest[] {
   try {
@@ -99,13 +86,11 @@ export function getCurrentUser(): User | null {
       localStorage.removeItem(SESSION_KEY);
       return null;
     }
-    // Prefer stored user object (for backend-authed users) over local lookup
+    // Use stored user object (for backend-authed users)
     if (session.user) {
       return mergeWithCache(session.user);
     }
-    const users = getUsers();
-    const found = users.find((u) => u.id === session.userId);
-    return found ? mergeWithCache(found) : null;
+    return null;
   } catch {
     return null;
   }
@@ -124,225 +109,12 @@ export function setCurrentUser(user: User | null): void {
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
-// ─── Legacy local auth (kept for fallback) ───────────────────────────────────
-
-export function registerUser(
-  username: string,
-  password: string,
-  displayName: string,
-): { ok: User } | { err: string } {
-  const users = getUsers();
-  if (users.find((u) => u.username.toLowerCase() === username.toLowerCase())) {
-    return { err: "Username already taken" };
-  }
-  const user: User = {
-    id: crypto.randomUUID(),
-    username: username.toLowerCase(),
-    displayName,
-    bio: "",
-    avatarUrl: undefined,
-    createdAt: Date.now(),
-    passwordHash: simpleHash(password),
-    useII: false,
-  };
-  users.push(user);
-  saveUsers(users);
-  return { ok: user };
-}
-
-export function loginUser(
-  username: string,
-  password: string,
-): { ok: User } | { err: string } {
-  const users = getUsers();
-  const user = users.find(
-    (u) => u.username.toLowerCase() === username.toLowerCase(),
-  );
-  if (!user) return { err: "User not found" };
-  if (user.passwordHash !== simpleHash(password))
-    return { err: "Incorrect password" };
-  return { ok: user };
-}
-
-export function loginOrRegisterII(principal: string): User {
-  const users = getUsers();
-  const username = `ii_${principal.slice(0, 8)}`;
-  let user = users.find((u) => u.username === username);
-  if (!user) {
-    user = {
-      id: crypto.randomUUID(),
-      username,
-      displayName: `User ${principal.slice(0, 6)}`,
-      bio: "",
-      avatarUrl: undefined,
-      createdAt: Date.now(),
-      passwordHash: "",
-      useII: true,
-    };
-    users.push(user);
-    saveUsers(users);
-  }
-  return user;
-}
-
-export function updateUserProfile(
-  userId: string,
-  displayName: string,
-  bio: string,
-  avatarUrl?: string,
-): void {
-  // Update local users list
-  const users = getUsers();
-  const idx = users.findIndex((u) => u.id === userId);
-  if (idx !== -1) {
-    users[idx].displayName = displayName;
-    users[idx].bio = bio;
-    if (avatarUrl !== undefined) {
-      users[idx].avatarUrl = avatarUrl;
-    }
-    saveUsers(users);
-  }
-
-  // Also update the profile cache by username
-  const allUsers = getUsers();
-  const foundUser = allUsers.find((u) => u.id === userId);
-  const username = foundUser?.username;
-  if (username) {
-    const cacheData: Partial<User> = { displayName, bio };
-    if (avatarUrl !== undefined) cacheData.avatarUrl = avatarUrl;
-    setUserProfileCache(username, cacheData);
-  }
-
-  // Also update current session user if it matches
-  const currentUser = getCurrentUser();
-  if (currentUser && currentUser.id === userId) {
-    const updated: User = {
-      ...currentUser,
-      displayName,
-      bio,
-      ...(avatarUrl !== undefined ? { avatarUrl } : {}),
-    };
-    setCurrentUser(updated);
-  }
-}
-
-export function searchUsers(query: string, currentUserId: string): User[] {
-  if (!query.trim()) return [];
-  const users = getUsers();
-  return users.filter(
-    (u) =>
-      u.id !== currentUserId &&
-      (u.username.toLowerCase().includes(query.toLowerCase()) ||
-        u.displayName.toLowerCase().includes(query.toLowerCase())),
-  );
-}
-
-export type UserConnectionStatus =
-  | "none"
-  | "pending_sent"
-  | "pending_received"
-  | "friends";
-
-export type UserWithStatus = User & {
-  connectionStatus: UserConnectionStatus;
-  requestId?: string;
-};
-
-export function searchUsersWithStatus(
-  query: string,
-  currentUser: User,
-): UserWithStatus[] {
-  const users = getUsers();
-  const requests = getRequests();
-
-  const filtered = users.filter((u) => {
-    if (u.id === currentUser.id) return false;
-    if (!query.trim()) return true;
-    return (
-      u.username.toLowerCase().includes(query.toLowerCase()) ||
-      u.displayName.toLowerCase().includes(query.toLowerCase())
-    );
-  });
-
-  return filtered.map((u) => {
-    // Check if friends
-    const friendReq = requests.find(
-      (r) =>
-        ((r.fromUser === currentUser.username && r.toUser === u.username) ||
-          (r.fromUser === u.username && r.toUser === currentUser.username)) &&
-        r.status === "accepted",
-    );
-    if (friendReq) {
-      return {
-        ...u,
-        connectionStatus: "friends" as const,
-        requestId: friendReq.id,
-      };
-    }
-
-    // Check pending sent
-    const sentReq = requests.find(
-      (r) =>
-        r.fromUser === currentUser.username &&
-        r.toUser === u.username &&
-        r.status === "pending",
-    );
-    if (sentReq) {
-      return {
-        ...u,
-        connectionStatus: "pending_sent" as const,
-        requestId: sentReq.id,
-      };
-    }
-
-    // Check pending received
-    const receivedReq = requests.find(
-      (r) =>
-        r.fromUser === u.username &&
-        r.toUser === currentUser.username &&
-        r.status === "pending",
-    );
-    if (receivedReq) {
-      return {
-        ...u,
-        connectionStatus: "pending_received" as const,
-        requestId: receivedReq.id,
-      };
-    }
-
-    return { ...u, connectionStatus: "none" as const };
-  });
-}
+// ─── Connection requests (local cache for messages & friends) ────────────────
 
 export function sendConnectionRequest(
   fromUser: User,
   toUsername: string,
 ): { ok: null } | { err: string } {
-  const users = getUsers();
-  const toUser = users.find((u) => u.username === toUsername);
-  // Allow sending request even if user isn't in local store (they might be canister-only)
-  if (!toUser) {
-    // Create a placeholder in local store
-    const requests = getRequests();
-    const existing = requests.find(
-      (r) =>
-        r.fromUser === fromUser.username &&
-        r.toUser === toUsername &&
-        r.status === "pending",
-    );
-    if (existing) return { err: "Request already sent" };
-    requests.push({
-      id: crypto.randomUUID(),
-      fromUser: fromUser.username,
-      fromDisplayName: fromUser.displayName,
-      fromAvatarUrl: fromUser.avatarUrl,
-      toUser: toUsername,
-      status: "pending",
-      createdAt: Date.now(),
-    });
-    saveRequests(requests);
-    return { ok: null };
-  }
   const requests = getRequests();
   const existing = requests.find(
     (r) =>
@@ -389,7 +161,8 @@ export function getPendingRequests(username: string): ConnectionRequest[] {
 
 export function getFriends(username: string): User[] {
   const requests = getRequests();
-  const users = getUsers();
+  // Build friend list from accepted connection requests
+  // Returns partial User objects with just username & displayName from request data
   const friendUsernames = requests
     .filter(
       (r) =>
@@ -397,7 +170,30 @@ export function getFriends(username: string): User[] {
         r.status === "accepted",
     )
     .map((r) => (r.fromUser === username ? r.toUser : r.fromUser));
-  return users.filter((u) => friendUsernames.includes(u.username));
+
+  return friendUsernames.map((uname) => {
+    // Find display name from requests
+    const req = requests.find(
+      (r) =>
+        (r.fromUser === uname || r.toUser === uname) && r.status === "accepted",
+    );
+    const displayName =
+      req?.fromUser === uname
+        ? req.fromDisplayName
+        : req?.fromUser === username
+          ? req.toUser
+          : uname;
+    return {
+      id: uname,
+      username: uname,
+      displayName: displayName || uname,
+      bio: "",
+      avatarUrl: undefined,
+      createdAt: 0,
+      passwordHash: "",
+      useII: false,
+    } as User;
+  });
 }
 
 export function sendMessage(
@@ -547,52 +343,13 @@ export function getPendingRequestCount(username: string): number {
   return getPendingRequests(username).length;
 }
 
-// Seed some demo data
-export function seedDemoData(): void {
-  const users = getUsers();
-  if (users.length > 0) return; // Already seeded
+export type UserConnectionStatus =
+  | "none"
+  | "pending_sent"
+  | "pending_received"
+  | "friends";
 
-  const demoUsers: User[] = [
-    {
-      id: "demo-1",
-      username: "alex_nova",
-      displayName: "Alex Nova",
-      bio: "Photographer | Explorer | Living life one snap at a time",
-      avatarUrl: undefined,
-      createdAt: Date.now() - 30 * 24 * 60 * 60 * 1000,
-      passwordHash: simpleHash("demo123"),
-      useII: false,
-    },
-    {
-      id: "demo-2",
-      username: "sara_moon",
-      displayName: "Sara Moon",
-      bio: "Design lover & coffee enthusiast ☕",
-      avatarUrl: undefined,
-      createdAt: Date.now() - 20 * 24 * 60 * 60 * 1000,
-      passwordHash: simpleHash("demo123"),
-      useII: false,
-    },
-    {
-      id: "demo-3",
-      username: "kai_zen",
-      displayName: "Kai Zen",
-      bio: "Building cool things on the internet",
-      avatarUrl: undefined,
-      createdAt: Date.now() - 15 * 24 * 60 * 60 * 1000,
-      passwordHash: simpleHash("demo123"),
-      useII: false,
-    },
-    {
-      id: "demo-4",
-      username: "priya_v",
-      displayName: "Priya Verma",
-      bio: "Artist & traveler 🌍",
-      avatarUrl: undefined,
-      createdAt: Date.now() - 10 * 24 * 60 * 60 * 1000,
-      passwordHash: simpleHash("demo123"),
-      useII: false,
-    },
-  ];
-  saveUsers(demoUsers);
-}
+export type UserWithStatus = User & {
+  connectionStatus: UserConnectionStatus;
+  requestId?: string;
+};

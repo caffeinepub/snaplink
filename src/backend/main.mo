@@ -82,6 +82,21 @@ actor SnapLink {
     usersByPrincipal.get(p.toText());
   };
 
+  // Check if there's a pending request from user1 to user2
+  func hasPendingRequest(fromUser : Text, toUser : Text) : ?ConnectionRequest {
+    for ((_, req) in connectionRequests.entries()) {
+      switch (req.status) {
+        case (#pending) {
+          if (req.fromUser == fromUser and req.toUser == toUser) {
+            return ?req;
+          };
+        };
+        case (_) {};
+      };
+    };
+    null;
+  };
+
   // ========== AUTH ==========
 
   public shared ({ caller }) func register(username : Text, password : Text, displayName : Text) : async { #ok : UserProfile; #err : Text } {
@@ -177,8 +192,19 @@ actor SnapLink {
     results;
   };
 
+  public query func getAllUsers() : async [UserProfile] {
+    var results : [UserProfile] = [];
+    for ((_, profile) in usersByUsername.entries()) {
+      results := results.concat([profile]);
+    };
+    results;
+  };
+
   // ========== CONNECTIONS ==========
 
+  // Mutual-interest friend system:
+  // - Sending a request is invisible to the recipient until they ALSO send a request back
+  // - When both sides have sent requests, the system auto-accepts both -> they become friends
   public shared ({ caller }) func sendConnectionRequest(toUsername : Text) : async { #ok; #err : Text } {
     let fromUsername = switch (getPrincipalUsername(caller)) {
       case (null) return #err("Not logged in");
@@ -189,23 +215,49 @@ actor SnapLink {
       case (null) return #err("User not found");
       case (?_) {};
     };
-    for ((_, req) in connectionRequests.entries()) {
-      if ((req.fromUser == fromUsername and req.toUser == toUsername) or
-          (req.fromUser == toUsername and req.toUser == fromUsername)) {
-        return #err("Connection already exists");
+
+    // Already friends?
+    if (areFriends(fromUsername, toUsername)) return #err("Already friends");
+
+    // Already sent a request in this direction?
+    switch (hasPendingRequest(fromUsername, toUsername)) {
+      case (?_) return #err("Request already sent");
+      case (null) {};
+    };
+
+    // Check if the OTHER person already sent a request to us (mutual interest)
+    switch (hasPendingRequest(toUsername, fromUsername)) {
+      case (?reverseReq) {
+        // Mutual! Accept both requests -> they become friends
+        connectionRequests.add(reverseReq.id, { reverseReq with status = #accepted });
+        // Also create the forward request as accepted
+        requestCounter += 1;
+        let reqId = generateId("req", requestCounter);
+        let newReq : ConnectionRequest = {
+          id = reqId;
+          fromUser = fromUsername;
+          toUser = toUsername;
+          status = #accepted;
+          createdAt = Time.now();
+        };
+        connectionRequests.add(reqId, newReq);
+        return #ok;
+      };
+      case (null) {
+        // No reverse request yet — store as pending (invisible to recipient)
+        requestCounter += 1;
+        let reqId = generateId("req", requestCounter);
+        let newReq : ConnectionRequest = {
+          id = reqId;
+          fromUser = fromUsername;
+          toUser = toUsername;
+          status = #pending;
+          createdAt = Time.now();
+        };
+        connectionRequests.add(reqId, newReq);
+        return #ok;
       };
     };
-    requestCounter += 1;
-    let reqId = generateId("req", requestCounter);
-    let newReq : ConnectionRequest = {
-      id = reqId;
-      fromUser = fromUsername;
-      toUser = toUsername;
-      status = #pending;
-      createdAt = Time.now();
-    };
-    connectionRequests.add(reqId, newReq);
-    #ok;
   };
 
   public shared ({ caller }) func respondToRequest(requestId : Text, accept : Bool) : async { #ok; #err : Text } {
@@ -223,6 +275,9 @@ actor SnapLink {
     };
   };
 
+  // Returns only mutual pending requests (both sides sent) for display purposes.
+  // In the new mutual system this is essentially unused for display since mutual
+  // requests are auto-accepted, but kept for compatibility.
   public shared ({ caller }) func getPendingRequests() : async [ConnectionRequest] {
     let username = switch (getPrincipalUsername(caller)) {
       case (null) return [];
@@ -232,8 +287,19 @@ actor SnapLink {
     for ((_, req) in connectionRequests.entries()) {
       switch (req.status) {
         case (#pending) {
+          // Only surface a request if BOTH sides have sent (mutual pending)
+          // In practice this shouldn't occur anymore since sendConnectionRequest
+          // auto-accepts mutual requests, but handle edge cases gracefully.
           if (req.toUser == username) {
-            results := results.concat([req]);
+            switch (hasPendingRequest(username, req.fromUser)) {
+              case (?_) {
+                // Mutual pending still exists (shouldn't happen normally)
+                results := results.concat([req]);
+              };
+              case (null) {
+                // One-sided: recipient doesn't see it
+              };
+            };
           };
         };
         case (_) {};
@@ -387,6 +453,8 @@ actor SnapLink {
   };
 
   public shared ({ caller }) func getPendingRequestCount() : async Nat {
+    // In the mutual system, pending count is effectively 0 for the recipient
+    // (they can't see one-sided requests). Return 0 since counts no longer apply.
     let username = switch (getPrincipalUsername(caller)) {
       case (null) return 0;
       case (?u) u;
@@ -395,7 +463,13 @@ actor SnapLink {
     for ((_, req) in connectionRequests.entries()) {
       switch (req.status) {
         case (#pending) {
-          if (req.toUser == username) count += 1;
+          // Only count mutual pending (both sides sent) as visible
+          if (req.toUser == username) {
+            switch (hasPendingRequest(username, req.fromUser)) {
+              case (?_) count += 1;
+              case (null) {};
+            };
+          };
         };
         case (_) {};
       };

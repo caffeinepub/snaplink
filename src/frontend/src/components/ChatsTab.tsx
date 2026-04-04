@@ -15,7 +15,6 @@ import { useApp } from "../context/AppContext";
 import {
   getConversationMessages,
   getConversations,
-  getUsers,
   markMessagesRead,
   sendMessage,
   viewSnap,
@@ -303,8 +302,6 @@ function ConversationList({
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const allUsers = getUsers();
-
   const filtered = conversations.filter(
     (c) =>
       !searchQuery.trim() ||
@@ -383,9 +380,6 @@ function ConversationList({
       ) : (
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           {filtered.map((conv, i) => {
-            const friendUser = allUsers.find(
-              (u) => u.username === conv.username,
-            );
             return (
               <motion.div
                 key={conv.username}
@@ -397,11 +391,7 @@ function ConversationList({
                 style={{ borderBottom: "1px solid rgba(42,48,72,0.5)" }}
                 data-ocid={`chats.item.${i + 1}`}
               >
-                <UserAvatar
-                  name={conv.displayName}
-                  size={50}
-                  avatarUrl={friendUser?.avatarUrl}
-                />
+                <UserAvatar name={conv.displayName} size={50} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <span className="text-white font-semibold text-[15px]">
@@ -456,9 +446,6 @@ function ChatView({
   const [viewingSnap, setViewingSnap] = useState<Message | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const allUsers = getUsers();
-  const friendUser = allUsers.find((u) => u.username === username);
-
   const refresh = useCallback(() => {
     if (currentUser) {
       const msgs = getConversationMessages(currentUser.username, username);
@@ -511,11 +498,7 @@ function ChatView({
         >
           <ArrowLeft size={22} color="#00CFFF" />
         </button>
-        <UserAvatar
-          name={displayName}
-          size={38}
-          avatarUrl={friendUser?.avatarUrl}
-        />
+        <UserAvatar name={displayName} size={38} />
         <div className="flex-1">
           <p className="text-white font-semibold text-[15px]">{displayName}</p>
           <p className="text-[#B0B0CC] text-xs">@{username}</p>

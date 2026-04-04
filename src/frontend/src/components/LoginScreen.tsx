@@ -8,11 +8,7 @@ import {
 } from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
-import {
-  loginOrRegisterII,
-  mergeWithCache,
-  setCurrentUser as persistUser,
-} from "../store";
+import { mergeWithCache, setCurrentUser as persistUser } from "../store";
 import { AnimatedLogo } from "./Logo";
 import { PressableButton } from "./Shared";
 
@@ -110,15 +106,14 @@ export function LoginScreen() {
             const user = mergeWithCache(fallbackResult.ok);
             persistUser(user);
             setCurrentUser(user);
+          } else {
+            setError("Could not connect to server. Please try again.");
           }
         }
       };
 
       handleII().catch(() => {
-        // If canister is unreachable, fall back to localStorage
-        const user = loginOrRegisterII(principal);
-        persistUser(user);
-        setCurrentUser(user);
+        setError("Could not connect to server. Please try again.");
       });
     }
   }, [identity, setCurrentUser]);

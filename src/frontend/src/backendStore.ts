@@ -5,7 +5,6 @@
  */
 import type { Identity } from "@icp-sdk/core/agent";
 import { createActorWithConfig } from "./config";
-import { getRequests } from "./store";
 import type { ConnectionRequest, User } from "./types";
 
 // ─── Motoko types (raw canister shapes) ─────────────────────────────────────
@@ -159,6 +158,16 @@ export async function backendSearchUsers(
   }
 }
 
+export async function backendGetAllUsers(): Promise<MotokoUserProfile[]> {
+  try {
+    const actor = await getAnonActor();
+    const results = await actor.getAllUsers();
+    return results as MotokoUserProfile[];
+  } catch {
+    return [];
+  }
+}
+
 export type UserConnectionStatus =
   | "none"
   | "pending_sent"
@@ -169,61 +178,6 @@ export type UserWithStatus = User & {
   connectionStatus: UserConnectionStatus;
   requestId?: string;
 };
-
-export async function backendGetAllUsersForSearch(
-  query: string,
-  currentUser: User,
-): Promise<UserWithStatus[]> {
-  const profiles = await backendSearchUsers(query);
-  const requests = getRequests();
-
-  return profiles
-    .filter((p) => p.username !== currentUser.username)
-    .map((p) => {
-      const u = moProfileToUser(p);
-
-      const friendReq = requests.find(
-        (r) =>
-          ((r.fromUser === currentUser.username && r.toUser === u.username) ||
-            (r.fromUser === u.username && r.toUser === currentUser.username)) &&
-          r.status === "accepted",
-      );
-      if (friendReq)
-        return {
-          ...u,
-          connectionStatus: "friends" as const,
-          requestId: friendReq.id,
-        };
-
-      const sentReq = requests.find(
-        (r) =>
-          r.fromUser === currentUser.username &&
-          r.toUser === u.username &&
-          r.status === "pending",
-      );
-      if (sentReq)
-        return {
-          ...u,
-          connectionStatus: "pending_sent" as const,
-          requestId: sentReq.id,
-        };
-
-      const receivedReq = requests.find(
-        (r) =>
-          r.fromUser === u.username &&
-          r.toUser === currentUser.username &&
-          r.status === "pending",
-      );
-      if (receivedReq)
-        return {
-          ...u,
-          connectionStatus: "pending_received" as const,
-          requestId: receivedReq.id,
-        };
-
-      return { ...u, connectionStatus: "none" as const };
-    });
-}
 
 // ─── Connection requests ─────────────────────────────────────────────────────
 

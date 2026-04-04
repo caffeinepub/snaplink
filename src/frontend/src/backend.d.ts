@@ -21,6 +21,7 @@ export interface backendInterface {
     getProfile(username: string): Promise<[] | [UserProfile]>;
     updateProfile(displayName: string, bio: string): Promise<{ ok: null } | { err: string }>;
     searchUsers(q: string): Promise<UserProfile[]>;
+    getAllUsers(): Promise<UserProfile[]>;
     sendConnectionRequest(toUsername: string): Promise<{ ok: null } | { err: string }>;
     respondToRequest(requestId: string, accept: boolean): Promise<{ ok: null } | { err: string }>;
     getPendingRequests(): Promise<ConnectionRequest[]>;
