@@ -70,6 +70,21 @@ export interface backendInterface {
   getUnreadCount(callerUsername: string): Promise<bigint>;
   getPendingRequestCount(callerUsername: string): Promise<bigint>;
   getConversations(callerUsername: string): Promise<any[]>;
+  // Stories
+  postStory(callerUsername: string, blobId: string, caption: string): Promise<{ ok: any } | { err: string }>;
+  getFriendStories(callerUsername: string): Promise<any[]>;
+  // Reactions
+  addReaction(callerUsername: string, messageId: string, emoji: string): Promise<{ ok: any } | { err: string }>;
+  getReactions(messageId: string): Promise<any[]>;
+  // Groups
+  createGroup(callerUsername: string, groupName: string, memberUsernames: string[]): Promise<{ ok: any } | { err: string }>;
+  getGroups(callerUsername: string): Promise<any[]>;
+  sendGroupMessage(callerUsername: string, groupId: string, content: string): Promise<{ ok: any } | { err: string }>;
+  getGroupMessages(callerUsername: string, groupId: string, since: bigint): Promise<any[]>;
+  // Streaks
+  getStreak(user1: string, user2: string): Promise<bigint>;
+  // Snap Score
+  getSnapScore(username: string): Promise<bigint>;
   // Admin
   clearAllData(): Promise<{ ok: null }>;
 }
@@ -164,6 +179,51 @@ export class Backend implements backendInterface {
   }
   getConversations(callerUsername: string): Promise<any[]> {
     return this.call(() => (this.actor as any).getConversations(callerUsername));
+  }
+
+  // ── Stories ─────────────────────────────────────────────────────────────────
+
+  postStory(callerUsername: string, blobId: string, caption: string): Promise<{ ok: any } | { err: string }> {
+    return this.call(() => (this.actor as any).postStory(callerUsername, blobId, caption));
+  }
+  getFriendStories(callerUsername: string): Promise<any[]> {
+    return this.call(() => (this.actor as any).getFriendStories(callerUsername));
+  }
+
+  // ── Reactions ───────────────────────────────────────────────────────────────
+
+  addReaction(callerUsername: string, messageId: string, emoji: string): Promise<{ ok: any } | { err: string }> {
+    return this.call(() => (this.actor as any).addReaction(callerUsername, messageId, emoji));
+  }
+  getReactions(messageId: string): Promise<any[]> {
+    return this.call(() => (this.actor as any).getReactions(messageId));
+  }
+
+  // ── Groups ──────────────────────────────────────────────────────────────────
+
+  createGroup(callerUsername: string, groupName: string, memberUsernames: string[]): Promise<{ ok: any } | { err: string }> {
+    return this.call(() => (this.actor as any).createGroup(callerUsername, groupName, memberUsernames));
+  }
+  getGroups(callerUsername: string): Promise<any[]> {
+    return this.call(() => (this.actor as any).getGroups(callerUsername));
+  }
+  sendGroupMessage(callerUsername: string, groupId: string, content: string): Promise<{ ok: any } | { err: string }> {
+    return this.call(() => (this.actor as any).sendGroupMessage(callerUsername, groupId, content));
+  }
+  getGroupMessages(callerUsername: string, groupId: string, since: bigint): Promise<any[]> {
+    return this.call(() => (this.actor as any).getGroupMessages(callerUsername, groupId, since));
+  }
+
+  // ── Streaks ─────────────────────────────────────────────────────────────────
+
+  getStreak(user1: string, user2: string): Promise<bigint> {
+    return this.call(() => (this.actor as any).getStreak(user1, user2));
+  }
+
+  // ── Snap Score ──────────────────────────────────────────────────────────────
+
+  getSnapScore(username: string): Promise<bigint> {
+    return this.call(() => (this.actor as any).getSnapScore(username));
   }
 
   // ── Admin ───────────────────────────────────────────────────────────────────

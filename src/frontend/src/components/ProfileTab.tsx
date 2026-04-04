@@ -4,6 +4,7 @@ import {
   Edit3,
   LogOut,
   MessageCircle,
+  Star,
   Trash2,
   Users,
   X,
@@ -14,6 +15,7 @@ import {
   backendClearAllData,
   backendGetConversations,
   backendGetFriends,
+  backendGetSnapScore,
 } from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
@@ -33,6 +35,7 @@ export function ProfileTab() {
   const [bio, setBio] = useState("");
   const [friends, setFriends] = useState<User[]>([]);
   const [conversationCount, setConversationCount] = useState(0);
+  const [snapScore, setSnapScore] = useState(0);
   const [saving, setSaving] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -50,25 +53,37 @@ export function ProfileTab() {
     }
   }, [currentUser]);
 
-  // Load friends and conversations from backend
+  // Load friends, conversations, and snap score from backend
   useEffect(() => {
     if (!currentUser) return;
-    backendGetFriends(currentUser.username, identity ?? undefined)
-      .then(setFriends)
-      .catch(() => setFriends([]));
-    backendGetConversations(currentUser.username, identity ?? undefined)
-      .then((convs: any[]) => setConversationCount(convs.length))
-      .catch(() => setConversationCount(0));
+    const refresh = async () => {
+      const [f, convs, score] = await Promise.all([
+        backendGetFriends(currentUser.username, identity ?? undefined).catch(
+          () => [] as User[],
+        ),
+        backendGetConversations(
+          currentUser.username,
+          identity ?? undefined,
+        ).catch(() => []),
+        backendGetSnapScore(currentUser.username, identity ?? undefined).catch(
+          () => 0,
+        ),
+      ]);
+      setFriends(f);
+      setConversationCount(convs.length);
+      setSnapScore(score);
+    };
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
   }, [currentUser, identity]);
 
   const handleSave = () => {
     if (!currentUser) return;
     setSaving(true);
-    // Update profile cache
     const cacheData: Partial<User> = { displayName, bio };
     if (avatarUrl !== undefined) cacheData.avatarUrl = avatarUrl;
     setUserProfileCache(currentUser.username, cacheData);
-    // Update session with new values
     const updated: User = {
       ...currentUser,
       displayName,
@@ -82,7 +97,6 @@ export function ProfileTab() {
   };
 
   const handleLogout = () => {
-    // Clear Internet Identity session so the II identity doesn't auto-re-login
     iiClear();
     logout();
   };
@@ -93,7 +107,6 @@ export function ProfileTab() {
     const result = await backendClearAllData();
     setClearing(false);
     if ("ok" in result) {
-      // Data cleared — sign out since account no longer exists
       iiClear();
       logout();
     } else {
@@ -108,7 +121,6 @@ export function ProfileTab() {
     reader.onloadend = () => {
       const dataUrl = reader.result as string;
       setAvatarUrl(dataUrl);
-      // Immediately persist so it shows everywhere
       setUserProfileCache(currentUser.username, { avatarUrl: dataUrl });
       const updated: User = { ...currentUser, avatarUrl: dataUrl };
       persistUser(updated);
@@ -122,7 +134,6 @@ export function ProfileTab() {
   const nameId = "profile-display-name";
   const bioId = "profile-bio";
 
-  // Merge profile cache for display
   const cache = getUserProfileCache();
   const cachedAvatar = cache[currentUser.username]?.avatarUrl ?? avatarUrl;
 
@@ -172,7 +183,6 @@ export function ProfileTab() {
           animate={{ scale: 1, opacity: 1 }}
           className="mb-4 relative"
         >
-          {/* Hidden file input */}
           <input
             ref={avatarInputRef}
             type="file"
@@ -181,24 +191,19 @@ export function ProfileTab() {
             onChange={handleAvatarFileChange}
             data-ocid="profile.upload_button"
           />
-          {/* Tappable avatar */}
           <button
             type="button"
             onClick={() => avatarInputRef.current?.click()}
             className="relative block rounded-full focus:outline-none"
             aria-label="Change profile picture"
-            style={{
-              padding: 0,
-              background: "transparent",
-              border: "none",
-            }}
+            style={{ padding: 0, background: "transparent", border: "none" }}
           >
-            {/* Gradient ring */}
             <div
               className="rounded-full p-0.5"
               style={{
                 background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
-                boxShadow: "0 0 20px rgba(0,207,255,0.3)",
+                boxShadow:
+                  "0 0 28px rgba(0,207,255,0.45), 0 0 8px rgba(189,0,255,0.2)",
               }}
             >
               <div
@@ -212,7 +217,6 @@ export function ProfileTab() {
                 />
               </div>
             </div>
-            {/* Camera overlay badge */}
             <div
               className="absolute bottom-0.5 right-0.5 w-8 h-8 rounded-full flex items-center justify-center"
               style={{
@@ -321,8 +325,8 @@ export function ProfileTab() {
         </AnimatePresence>
       </div>
 
-      {/* Stats */}
-      <div className="mx-5 grid grid-cols-2 gap-3 mb-5">
+      {/* Stats - now 3 columns with Snap Score */}
+      <div className="mx-5 grid grid-cols-3 gap-3 mb-5">
         <div className="card-surface p-4 flex flex-col items-center gap-1">
           <div className="flex items-center gap-1.5">
             <Users size={18} color="#00CFFF" />
@@ -339,7 +343,14 @@ export function ProfileTab() {
               {conversationCount}
             </span>
           </div>
-          <p className="text-[#B0B0CC] text-xs">Conversations</p>
+          <p className="text-[#B0B0CC] text-xs">Chats</p>
+        </div>
+        <div className="card-surface p-4 flex flex-col items-center gap-1">
+          <div className="flex items-center gap-1.5">
+            <Star size={18} color="#FFAA00" />
+            <span className="text-2xl font-bold text-white">{snapScore}</span>
+          </div>
+          <p className="text-[#B0B0CC] text-xs">Score</p>
         </div>
       </div>
 
@@ -411,7 +422,6 @@ export function ProfileTab() {
           Clear All Data
         </PressableButton>
 
-        {/* Inline confirmation panel */}
         <AnimatePresence>
           {showClearConfirm && (
             <motion.div
@@ -474,7 +484,6 @@ export function ProfileTab() {
                   >
                     Cancel
                   </PressableButton>
-
                   <PressableButton
                     onClick={handleClearAllData}
                     disabled={clearing}
@@ -490,17 +499,15 @@ export function ProfileTab() {
                     data-ocid="profile.confirm_button"
                   >
                     {clearing ? (
-                      <>
-                        <motion.span
-                          animate={{ opacity: [1, 0.4, 1] }}
-                          transition={{
-                            duration: 1,
-                            repeat: Number.POSITIVE_INFINITY,
-                          }}
-                        >
-                          Clearing...
-                        </motion.span>
-                      </>
+                      <motion.span
+                        animate={{ opacity: [1, 0.4, 1] }}
+                        transition={{
+                          duration: 1,
+                          repeat: Number.POSITIVE_INFINITY,
+                        }}
+                      >
+                        Clearing...
+                      </motion.span>
                     ) : (
                       <>Yes, Delete Everything</>
                     )}
@@ -548,13 +555,8 @@ export function ProfileTab() {
       {/* Footer branding */}
       <div className="mt-auto pb-8 pt-2 flex flex-col items-center gap-1">
         <p
-          className="text-xs"
-          style={{
-            color: "#B0B0CC",
-            opacity: 0.45,
-            fontStyle: "italic",
-            letterSpacing: "0.05em",
-          }}
+          className="text-gradient text-xs font-semibold"
+          style={{ letterSpacing: "0.05em", fontSize: "13px" }}
         >
           Made by Deepak Chahal
         </p>

@@ -132,8 +132,28 @@ export function LoginScreen() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
         className="flex flex-col items-center gap-4 mb-8"
+        style={{ position: "relative" }}
       >
-        <AnimatedLogo size={90} />
+        <div style={{ position: "relative" }}>
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: 200,
+              height: 200,
+              borderRadius: "50%",
+              background:
+                "radial-gradient(circle, rgba(0,207,255,0.12) 0%, rgba(189,0,255,0.08) 50%, transparent 70%)",
+              pointerEvents: "none",
+              zIndex: 0,
+            }}
+          />
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <AnimatedLogo size={90} />
+          </div>
+        </div>
         <div className="text-center">
           <h1 className="text-4xl font-bold text-gradient tracking-tight">
             SnapLink
@@ -327,12 +347,9 @@ export function LoginScreen() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.6 }}
-        className="absolute bottom-8 text-center"
+        className="absolute bottom-8 text-center text-gradient font-semibold"
         style={{
-          color: "#B0B0CC",
-          opacity: 0.5,
-          fontSize: "12px",
-          fontStyle: "italic",
+          fontSize: "13px",
           letterSpacing: "0.05em",
         }}
       >

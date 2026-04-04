@@ -152,7 +152,7 @@
 
   .card-surface {
     background-color: #1a1f33;
-    border: 1px solid #2a3048;
+    border: 1px solid rgba(42, 48, 72, 0.9);
     border-radius: 16px;
   }
 

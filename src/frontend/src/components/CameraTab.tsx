@@ -1,9 +1,13 @@
 import {
   ChevronDown,
   Clock,
+  Pen,
+  RotateCcw,
   Send,
   Sparkles,
+  StickerIcon,
   SwitchCamera,
+  Type,
   Upload,
   Video,
   X,
@@ -26,6 +30,859 @@ import { AiSnapAssistant } from "./AiSnapAssistant";
 import { PressableButton, UserAvatar } from "./Shared";
 
 type CameraState = "viewfinder" | "preview";
+type PreviewTab = "filters" | "draw" | "stickers" | "text";
+
+// ─── Snap Filter definitions ──────────────────────────────────────────────────────────────────
+
+interface SnapFilter {
+  id: string;
+  label: string;
+  css: string;
+  canvas: (ctx: CanvasRenderingContext2D, w: number, h: number) => void;
+}
+
+const SNAP_FILTERS: SnapFilter[] = [
+  { id: "normal", label: "Normal", css: "none", canvas: () => {} },
+  {
+    id: "warm",
+    label: "Warm",
+    css: "sepia(0.4) saturate(1.3) brightness(1.05)",
+    canvas: (ctx, w, h) => {
+      ctx.globalCompositeOperation = "multiply";
+      ctx.fillStyle = "rgba(255,160,80,0.18)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = "source-over";
+    },
+  },
+  {
+    id: "cool",
+    label: "Cool",
+    css: "hue-rotate(190deg) saturate(1.1) brightness(1.05)",
+    canvas: (ctx, w, h) => {
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = "rgba(60,120,255,0.12)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = "source-over";
+    },
+  },
+  { id: "bw", label: "B&W", css: "grayscale(1)", canvas: () => {} },
+  {
+    id: "vivid",
+    label: "Vivid",
+    css: "saturate(1.8) contrast(1.1)",
+    canvas: () => {},
+  },
+];
+
+// ─── Drawing tool constants ─────────────────────────────────────────────────────────────────
+
+const DRAW_COLORS = [
+  { hex: "#FF4444", label: "Red" },
+  { hex: "#FF8800", label: "Orange" },
+  { hex: "#FFE600", label: "Yellow" },
+  { hex: "#44FF44", label: "Green" },
+  { hex: "#00CFFF", label: "Blue" },
+  { hex: "#FFFFFF", label: "White" },
+];
+
+// ─── Sticker packs ──────────────────────────────────────────────────────────────────────
+
+const STICKER_PACKS: Record<string, string[]> = {
+  Expressions: [
+    "😂",
+    "😍",
+    "😭",
+    "😎",
+    "🤩",
+    "🥰",
+    "😏",
+    "🤔",
+    "😴",
+    "🤯",
+    "🥳",
+    "😤",
+  ],
+  Animals: [
+    "🐶",
+    "🐱",
+    "🐼",
+    "🦊",
+    "🐨",
+    "🦁",
+    "🐯",
+    "🐸",
+    "🦄",
+    "🦋",
+    "🐙",
+    "🦈",
+  ],
+  Symbols: [
+    "❤️",
+    "🔥",
+    "⭐",
+    "💯",
+    "✨",
+    "💫",
+    "🎉",
+    "🎊",
+    "💥",
+    "🌈",
+    "💎",
+    "👑",
+  ],
+  Food: [
+    "🍕",
+    "🍔",
+    "🍟",
+    "🌮",
+    "🍜",
+    "🍣",
+    "🍰",
+    "🍩",
+    "🎂",
+    "🍦",
+    "🥑",
+    "🍓",
+  ],
+};
+
+// ─── Text style definitions ─────────────────────────────────────────────────────────────────
+
+type TextStyle = "bold" | "neon" | "typewriter" | "bubble" | "shadow";
+
+interface PlacedItem {
+  id: string;
+  type: "sticker" | "text";
+  content: string; // emoji or text
+  x: number;
+  y: number;
+  style?: TextStyle;
+  color?: string;
+}
+
+interface DrawStroke {
+  points: { x: number; y: number }[];
+  color: string;
+  size: number;
+}
+
+// ─── Filter thumbnail strip ────────────────────────────────────────────────────────────────
+
+function FilterStrip({
+  imageDataUrl,
+  selectedFilter,
+  onSelect,
+}: {
+  imageDataUrl: string;
+  selectedFilter: string;
+  onSelect: (filterId: string) => void;
+}) {
+  return (
+    <div className="flex gap-3 overflow-x-auto scrollbar-hide px-1 py-2">
+      {SNAP_FILTERS.map((f) => (
+        <button
+          key={f.id}
+          type="button"
+          onClick={() => onSelect(f.id)}
+          className="flex flex-col items-center gap-1 flex-shrink-0"
+        >
+          <div
+            className="relative w-14 h-14 rounded-xl overflow-hidden"
+            style={{
+              border:
+                selectedFilter === f.id
+                  ? "2px solid #00CFFF"
+                  : "2px solid transparent",
+              boxShadow:
+                selectedFilter === f.id
+                  ? "0 0 8px rgba(0,207,255,0.5)"
+                  : "none",
+            }}
+          >
+            <img
+              src={imageDataUrl}
+              alt={f.label}
+              className="w-full h-full object-cover"
+              style={{ filter: f.css }}
+            />
+          </div>
+          <span
+            className="text-[10px] font-medium"
+            style={{ color: selectedFilter === f.id ? "#00CFFF" : "#B0B0CC" }}
+          >
+            {f.label}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Drawing overlay canvas ───────────────────────────────────────────────────────────────
+
+function DrawingCanvas({
+  containerRef,
+  strokes,
+  onStrokeAdd,
+  currentColor,
+  brushSize,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  strokes: DrawStroke[];
+  onStrokeAdd: (stroke: DrawStroke) => void;
+  currentColor: string;
+  brushSize: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isDrawingRef = useRef(false);
+  const currentStrokeRef = useRef<{ x: number; y: number }[]>([]);
+
+  // Redraw all strokes whenever strokes array changes
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const stroke of strokes) {
+      if (stroke.points.length < 2) continue;
+      ctx.beginPath();
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.size;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.moveTo(
+        stroke.points[0].x * canvas.width,
+        stroke.points[0].y * canvas.height,
+      );
+      for (let i = 1; i < stroke.points.length; i++) {
+        ctx.lineTo(
+          stroke.points[i].x * canvas.width,
+          stroke.points[i].y * canvas.height,
+        );
+      }
+      ctx.stroke();
+    }
+  }, [strokes]);
+
+  const getPos = (
+    e: React.TouchEvent | React.MouseEvent,
+  ): { x: number; y: number } | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    let clientX: number;
+    let clientY: number;
+    if ("touches" in e) {
+      if (e.touches.length === 0) return null;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    return {
+      x: (clientX - rect.left) / rect.width,
+      y: (clientY - rect.top) / rect.height,
+    };
+  };
+
+  const startDraw = (e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    const pos = getPos(e);
+    if (!pos) return;
+    isDrawingRef.current = true;
+    currentStrokeRef.current = [pos];
+    // Draw a single dot for immediate feedback
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.beginPath();
+        ctx.arc(
+          pos.x * canvas.width,
+          pos.y * canvas.height,
+          brushSize / 2,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fillStyle = currentColor;
+        ctx.fill();
+      }
+    }
+  };
+
+  const draw = (e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    if (!isDrawingRef.current) return;
+    const pos = getPos(e);
+    if (!pos) return;
+    currentStrokeRef.current.push(pos);
+    // Live draw on canvas
+    const canvas = canvasRef.current;
+    if (canvas && currentStrokeRef.current.length >= 2) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        const pts = currentStrokeRef.current;
+        const prev = pts[pts.length - 2];
+        const curr = pts[pts.length - 1];
+        ctx.beginPath();
+        ctx.strokeStyle = currentColor;
+        ctx.lineWidth = brushSize;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.moveTo(prev.x * canvas.width, prev.y * canvas.height);
+        ctx.lineTo(curr.x * canvas.width, curr.y * canvas.height);
+        ctx.stroke();
+      }
+    }
+  };
+
+  const endDraw = (e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
+    const points = [...currentStrokeRef.current];
+    currentStrokeRef.current = [];
+    if (points.length > 0) {
+      onStrokeAdd({ points, color: currentColor, size: brushSize });
+    }
+  };
+
+  // Sync canvas size with container
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+    const rect = container.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+  }, [containerRef]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 w-full h-full"
+      style={{ zIndex: 10, touchAction: "none", cursor: "crosshair" }}
+      onMouseDown={startDraw}
+      onMouseMove={draw}
+      onMouseUp={endDraw}
+      onMouseLeave={endDraw}
+      onTouchStart={startDraw}
+      onTouchMove={draw}
+      onTouchEnd={endDraw}
+    />
+  );
+}
+
+// ─── Drawing toolbar ──────────────────────────────────────────────────────────────────
+
+function DrawingToolbar({
+  selectedColor,
+  onColorChange,
+  brushSize,
+  onBrushChange,
+  onUndo,
+  onClear,
+}: {
+  selectedColor: string;
+  onColorChange: (c: string) => void;
+  brushSize: number;
+  onBrushChange: (s: number) => void;
+  onUndo: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div
+      className="flex flex-col gap-2 px-4 py-3"
+      style={{ background: "rgba(10,10,20,0.9)" }}
+    >
+      {/* Color row */}
+      <div className="flex items-center gap-2">
+        {DRAW_COLORS.map((c) => (
+          <button
+            key={c.hex}
+            type="button"
+            onClick={() => onColorChange(c.hex)}
+            className="w-7 h-7 rounded-full flex-shrink-0 transition-transform"
+            style={{
+              background: c.hex,
+              border:
+                selectedColor === c.hex
+                  ? "2.5px solid white"
+                  : "2px solid rgba(255,255,255,0.2)",
+              transform: selectedColor === c.hex ? "scale(1.2)" : "scale(1)",
+            }}
+            aria-label={c.label}
+          />
+        ))}
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={onUndo}
+          className="w-8 h-8 rounded-full flex items-center justify-center"
+          style={{ background: "rgba(255,255,255,0.1)" }}
+          aria-label="Undo stroke"
+        >
+          <RotateCcw size={14} color="#B0B0CC" />
+        </button>
+        <button
+          type="button"
+          onClick={onClear}
+          className="w-8 h-8 rounded-full flex items-center justify-center"
+          style={{ background: "rgba(255,80,80,0.15)" }}
+          aria-label="Clear drawing"
+        >
+          <X size={14} color="#FF6B6B" />
+        </button>
+      </div>
+      {/* Brush size */}
+      <div className="flex items-center gap-3">
+        <div
+          className="rounded-full flex-shrink-0"
+          style={{ width: 6, height: 6, background: "#B0B0CC" }}
+        />
+        <input
+          type="range"
+          min={2}
+          max={20}
+          value={brushSize}
+          onChange={(e) => onBrushChange(Number(e.target.value))}
+          className="flex-1 h-1 appearance-none rounded-full"
+          style={{ accentColor: "#00CFFF" }}
+        />
+        <div
+          className="rounded-full flex-shrink-0"
+          style={{ width: 18, height: 18, background: "#B0B0CC" }}
+        />
+        <span className="text-[#B0B0CC] text-xs w-6 text-right">
+          {brushSize}px
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sticker panel ────────────────────────────────────────────────────────────────────
+
+function StickerPanel({ onPlace }: { onPlace: (emoji: string) => void }) {
+  const [activeCategory, setActiveCategory] = useState("Expressions");
+  return (
+    <div style={{ background: "rgba(10,10,20,0.9)" }}>
+      {/* Category tabs */}
+      <div className="flex gap-1 px-4 pt-2 pb-1 overflow-x-auto scrollbar-hide">
+        {Object.keys(STICKER_PACKS).map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            onClick={() => setActiveCategory(cat)}
+            className="flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold transition-all"
+            style={{
+              background:
+                activeCategory === cat
+                  ? "rgba(0,207,255,0.2)"
+                  : "rgba(255,255,255,0.06)",
+              color: activeCategory === cat ? "#00CFFF" : "#B0B0CC",
+              border:
+                activeCategory === cat
+                  ? "1px solid rgba(0,207,255,0.4)"
+                  : "1px solid transparent",
+            }}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+      {/* Stickers grid */}
+      <div className="grid grid-cols-6 gap-1 px-4 py-2">
+        {(STICKER_PACKS[activeCategory] ?? []).map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onPlace(emoji)}
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-2xl active:scale-90 transition-transform"
+            style={{ background: "rgba(255,255,255,0.05)" }}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Text style panel ────────────────────────────────────────────────────────────────────
+
+const TEXT_STYLES: { id: TextStyle; label: string; preview: string }[] = [
+  { id: "bold", label: "Bold", preview: "B" },
+  { id: "neon", label: "Neon", preview: "N" },
+  { id: "typewriter", label: "Typo", preview: "T" },
+  { id: "bubble", label: "Bubble", preview: "O" },
+  { id: "shadow", label: "Shadow", preview: "S" },
+];
+
+function TextPanel({
+  onAddText,
+}: {
+  onAddText: (text: string, style: TextStyle, color: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const [style, setStyle] = useState<TextStyle>("bold");
+  const [color, setColor] = useState("#FFFFFF");
+
+  const handleAdd = () => {
+    if (!text.trim()) return;
+    onAddText(text.trim(), style, color);
+    setText("");
+  };
+
+  return (
+    <div
+      className="flex flex-col gap-2 px-4 py-3"
+      style={{ background: "rgba(10,10,20,0.9)" }}
+    >
+      {/* Text input */}
+      <input
+        type="text"
+        placeholder="Type your text..."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleAdd();
+        }}
+        className="w-full bg-transparent text-white text-sm outline-none px-3 py-2 rounded-xl"
+        style={{
+          background: "rgba(255,255,255,0.08)",
+          border: "1px solid rgba(255,255,255,0.12)",
+        }}
+        maxLength={60}
+      />
+      {/* Style row */}
+      <div className="flex items-center gap-2">
+        {TEXT_STYLES.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => setStyle(s.id)}
+            className="flex-1 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{
+              background:
+                style === s.id
+                  ? "rgba(0,207,255,0.18)"
+                  : "rgba(255,255,255,0.06)",
+              color: style === s.id ? "#00CFFF" : "#B0B0CC",
+              border:
+                style === s.id
+                  ? "1px solid rgba(0,207,255,0.4)"
+                  : "1px solid transparent",
+            }}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+      {/* Color + Add button row */}
+      <div className="flex items-center gap-2">
+        {DRAW_COLORS.map((c) => (
+          <button
+            key={c.hex}
+            type="button"
+            onClick={() => setColor(c.hex)}
+            className="w-6 h-6 rounded-full flex-shrink-0 transition-transform"
+            style={{
+              background: c.hex,
+              border:
+                color === c.hex
+                  ? "2.5px solid white"
+                  : "2px solid rgba(255,255,255,0.2)",
+              transform: color === c.hex ? "scale(1.25)" : "scale(1)",
+            }}
+            aria-label={c.label}
+          />
+        ))}
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={handleAdd}
+          disabled={!text.trim()}
+          className="px-4 py-1.5 rounded-xl text-xs font-bold text-white"
+          style={{
+            background: text.trim()
+              ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
+              : "#2A3048",
+            opacity: text.trim() ? 1 : 0.5,
+          }}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Placed items overlay (stickers + text draggable) ─────────────────────────────────
+
+function PlacedItemsOverlay({
+  items,
+  onMove,
+}: {
+  items: PlacedItem[];
+  onMove: (id: string, x: number, y: number) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const startDrag = (
+    e: React.TouchEvent | React.MouseEvent,
+    itemId: string,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const move = (ev: TouchEvent | MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      let clientX: number;
+      let clientY: number;
+      if ("touches" in ev) {
+        clientX = ev.touches[0].clientX;
+        clientY = ev.touches[0].clientY;
+      } else {
+        clientX = (ev as MouseEvent).clientX;
+        clientY = (ev as MouseEvent).clientY;
+      }
+      const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+      onMove(itemId, x, y);
+    };
+
+    const end = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", end);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", end);
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", end);
+    window.addEventListener("touchmove", move, { passive: false });
+    window.addEventListener("touchend", end);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      style={{ zIndex: 11 }}
+    >
+      {items.map((item) => (
+        <div
+          key={item.id}
+          className="absolute pointer-events-auto select-none"
+          style={{
+            left: `${item.x * 100}%`,
+            top: `${item.y * 100}%`,
+            transform: "translate(-50%, -50%)",
+            cursor: "grab",
+            touchAction: "none",
+          }}
+          onMouseDown={(e) => startDrag(e, item.id)}
+          onTouchStart={(e) => startDrag(e, item.id)}
+        >
+          {item.type === "sticker" ? (
+            <span style={{ fontSize: 40, lineHeight: 1, userSelect: "none" }}>
+              {item.content}
+            </span>
+          ) : (
+            <span
+              style={{
+                fontSize: 28,
+                fontWeight:
+                  item.style === "bold" || item.style === "bubble"
+                    ? "bold"
+                    : item.style === "neon"
+                      ? "bold"
+                      : "normal",
+                fontFamily:
+                  item.style === "typewriter"
+                    ? "'Courier New', monospace"
+                    : "system-ui, sans-serif",
+                color: item.color ?? "#FFFFFF",
+                textShadow:
+                  item.style === "neon"
+                    ? "0 0 8px #00CFFF, 0 0 16px #00CFFF"
+                    : item.style === "shadow"
+                      ? "2px 2px 4px rgba(0,0,0,0.9), 3px 3px 6px rgba(0,0,0,0.7)"
+                      : item.style === "bubble"
+                        ? "-1px -1px 0 rgba(0,0,0,0.8), 1px -1px 0 rgba(0,0,0,0.8), -1px 1px 0 rgba(0,0,0,0.8), 1px 1px 0 rgba(0,0,0,0.8)"
+                        : "1px 1px 2px rgba(0,0,0,0.8)",
+                WebkitTextStroke:
+                  item.style === "bubble" ? "2px rgba(0,0,0,0.6)" : "none",
+                userSelect: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {item.content}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Canvas baking helper (includes drawing, stickers, text) ────────────────────────────
+
+async function bakeImageFull(opts: {
+  dataUrl: string;
+  filter: SnapFilter;
+  showTimestamp: boolean;
+  strokes: DrawStroke[];
+  placedItems: PlacedItem[];
+  containerWidth: number;
+  containerHeight: number;
+}): Promise<Blob> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.82);
+        return;
+      }
+
+      // 1. Draw base image with filter
+      ctx.filter = opts.filter.css === "none" ? "none" : opts.filter.css;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      ctx.filter = "none";
+      opts.filter.canvas(ctx, canvas.width, canvas.height);
+
+      // 2. Timestamp overlay
+      if (opts.showTimestamp) {
+        const now = new Date();
+        const label = `${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} • ${now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`;
+        const pad = 12;
+        const fontSize = Math.max(14, Math.round(canvas.width * 0.035));
+        ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+        const textW = ctx.measureText(label).width;
+        const boxX = canvas.width - textW - pad * 2 - 16;
+        const boxY = canvas.height - fontSize - pad * 2 - 20;
+        const boxW = textW + pad * 2;
+        const boxH = fontSize + pad;
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.beginPath();
+        const r = boxH / 2;
+        ctx.moveTo(boxX + r, boxY);
+        ctx.arcTo(boxX + boxW, boxY, boxX + boxW, boxY + boxH, r);
+        ctx.arcTo(boxX + boxW, boxY + boxH, boxX, boxY + boxH, r);
+        ctx.arcTo(boxX, boxY + boxH, boxX, boxY, r);
+        ctx.arcTo(boxX, boxY, boxX + boxW, boxY, r);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillText(label, boxX + pad, boxY + boxH - pad * 0.45);
+      }
+
+      // 3. Draw strokes (normalized coordinates -> canvas coordinates)
+      const scaleX = canvas.width / (opts.containerWidth || 1);
+      const scaleY = canvas.height / (opts.containerHeight || 1);
+      for (const stroke of opts.strokes) {
+        if (stroke.points.length < 2) continue;
+        ctx.beginPath();
+        ctx.strokeStyle = stroke.color;
+        ctx.lineWidth = stroke.size * Math.min(scaleX, scaleY);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.moveTo(
+          stroke.points[0].x * canvas.width,
+          stroke.points[0].y * canvas.height,
+        );
+        for (let i = 1; i < stroke.points.length; i++) {
+          ctx.lineTo(
+            stroke.points[i].x * canvas.width,
+            stroke.points[i].y * canvas.height,
+          );
+        }
+        ctx.stroke();
+      }
+
+      // 4. Render placed items (stickers + text)
+      for (const item of opts.placedItems) {
+        const cx = item.x * canvas.width;
+        const cy = item.y * canvas.height;
+        if (item.type === "sticker") {
+          const fontSize = Math.round(canvas.width * 0.1);
+          ctx.font = `${fontSize}px serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(item.content, cx, cy);
+        } else {
+          // text
+          const fontSize = Math.round(canvas.width * 0.065);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+          switch (item.style) {
+            case "bold":
+              ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+              ctx.fillStyle = item.color ?? "#FFFFFF";
+              ctx.shadowColor = "rgba(0,0,0,0.5)";
+              ctx.shadowBlur = 4;
+              ctx.fillText(item.content, cx, cy);
+              break;
+            case "neon":
+              ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+              ctx.fillStyle = "#FFFFFF";
+              ctx.shadowColor = "#00CFFF";
+              ctx.shadowBlur = 20;
+              ctx.fillText(item.content, cx, cy);
+              ctx.shadowBlur = 40;
+              ctx.fillText(item.content, cx, cy);
+              break;
+            case "typewriter":
+              ctx.font = `${fontSize}px 'Courier New', monospace`;
+              ctx.fillStyle = item.color ?? "#FFFFFF";
+              ctx.shadowColor = "rgba(0,0,0,0.6)";
+              ctx.shadowBlur = 3;
+              ctx.fillText(item.content, cx, cy);
+              break;
+            case "bubble":
+              ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+              ctx.lineWidth = 6;
+              ctx.strokeStyle = "rgba(0,0,0,0.8)";
+              ctx.strokeText(item.content, cx, cy);
+              ctx.fillStyle = item.color ?? "#FFFFFF";
+              ctx.fillText(item.content, cx, cy);
+              break;
+            case "shadow":
+              ctx.font = `${fontSize}px system-ui, sans-serif`;
+              ctx.fillStyle = item.color ?? "#FFFFFF";
+              ctx.shadowColor = "rgba(0,0,0,0.9)";
+              ctx.shadowBlur = 8;
+              ctx.shadowOffsetX = 3;
+              ctx.shadowOffsetY = 3;
+              ctx.fillText(item.content, cx, cy);
+              break;
+          }
+          // Reset shadow
+          ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+        }
+      }
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+
+      canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.82);
+    };
+    img.src = opts.dataUrl;
+  });
+}
 
 function SnapTimer({
   duration,
@@ -109,18 +966,15 @@ function SnapTimer({
 
 function RecordingTimer({ startTime }: { startTime: number }) {
   const [elapsed, setElapsed] = useState(0);
-
   useEffect(() => {
     const interval = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTime) / 1000));
     }, 500);
     return () => clearInterval(interval);
   }, [startTime]);
-
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;
   const label = `${minutes}:${seconds.toString().padStart(2, "0")}`;
-
   return (
     <div
       className="flex items-center gap-2 px-3 py-1.5 rounded-full"
@@ -214,15 +1068,12 @@ function SendToSheet({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Handle */}
         <div className="flex justify-center pt-3 pb-1">
           <div
             className="w-10 h-1 rounded-full"
             style={{ background: "rgba(255,255,255,0.2)" }}
           />
         </div>
-
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-3">
           <h2 className="text-white font-bold text-lg">Send To</h2>
           <button
@@ -235,7 +1086,6 @@ function SendToSheet({
           </button>
         </div>
 
-        {/* Friend list */}
         <div
           className="flex-1 overflow-y-auto px-4 pb-2"
           style={{ minHeight: 0 }}
@@ -315,7 +1165,6 @@ function SendToSheet({
           )}
         </div>
 
-        {/* Error message */}
         {sendError && (
           <div className="px-4 pb-2">
             <p className="text-xs text-center" style={{ color: "#FF4444" }}>
@@ -324,7 +1173,6 @@ function SendToSheet({
           </div>
         )}
 
-        {/* Send button */}
         <div className="px-4 py-4" style={{ borderTop: "1px solid #2A3048" }}>
           <AnimatePresence mode="wait">
             {sent ? (
@@ -393,9 +1241,7 @@ function SendToSheet({
                     : "Sending..."
                   : selectedFriends.length === 0
                     ? "Select friends to send"
-                    : `Send to ${selectedFriends.length} friend${
-                        selectedFriends.length > 1 ? "s" : ""
-                      }`}
+                    : `Send to ${selectedFriends.length} friend${selectedFriends.length > 1 ? "s" : ""}`}
               </PressableButton>
             )}
           </AnimatePresence>
@@ -429,6 +1275,25 @@ export function CameraTab() {
   const [recordingStartTime, setRecordingStartTime] = useState<number | null>(
     null,
   );
+
+  // Filter state
+  const [selectedFilterId, setSelectedFilterId] = useState("normal");
+  const [showTimestampOverlay, setShowTimestampOverlay] = useState(false);
+
+  // Preview tab state
+  const [previewTab, setPreviewTab] = useState<PreviewTab>("filters");
+
+  // Drawing state
+  const [drawStrokes, setDrawStrokes] = useState<DrawStroke[]>([]);
+  const [drawColor, setDrawColor] = useState("#00CFFF");
+  const [brushSize, setBrushSize] = useState(6);
+
+  // Placed items (stickers + text)
+  const [placedItems, setPlacedItems] = useState<PlacedItem[]>([]);
+
+  // Preview container ref for canvas sizing
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
@@ -447,7 +1312,6 @@ export function CameraTab() {
     isSupported,
   } = useCamera({ facingMode: "environment", quality: 0.85 });
 
-  // Load friends from backend whenever user changes or send sheet opens
   useEffect(() => {
     if (currentUser) {
       backendGetFriends(currentUser.username, identity ?? undefined)
@@ -473,6 +1337,9 @@ export function CameraTab() {
     };
   }, []);
 
+  const selectedFilter =
+    SNAP_FILTERS.find((f) => f.id === selectedFilterId) ?? SNAP_FILTERS[0];
+
   const handleCapture = useCallback(async () => {
     const file = await capturePhoto();
     if (!file) return;
@@ -489,14 +1356,12 @@ export function CameraTab() {
   const startRecording = useCallback(() => {
     const stream = videoRef.current?.srcObject as MediaStream | null;
     if (!stream || !isActive) return;
-
     recordedChunksRef.current = [];
     const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
       ? "video/webm;codecs=vp9"
       : MediaRecorder.isTypeSupported("video/webm")
         ? "video/webm"
         : "video/mp4";
-
     try {
       const recorder = new MediaRecorder(stream, { mimeType });
       recorder.ondataavailable = (e) => {
@@ -591,30 +1456,70 @@ export function CameraTab() {
     );
   };
 
+  const handleAddSticker = (emoji: string) => {
+    const id = `sticker-${Date.now()}-${Math.random()}`;
+    setPlacedItems((prev) => [
+      ...prev,
+      { id, type: "sticker", content: emoji, x: 0.5, y: 0.4 },
+    ]);
+  };
+
+  const handleAddText = (text: string, style: TextStyle, color: string) => {
+    const id = `text-${Date.now()}-${Math.random()}`;
+    setPlacedItems((prev) => [
+      ...prev,
+      { id, type: "text", content: text, x: 0.5, y: 0.35, style, color },
+    ]);
+  };
+
+  const handleMoveItem = (id: string, x: number, y: number) => {
+    setPlacedItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, x, y } : item)),
+    );
+  };
+
   const handleSendSnap = async () => {
     if (!currentUser || selectedFriends.length === 0) return;
     setSendError(null);
     setSending(true);
-
     const isVideo = !!capturedVideo;
     const recipientFriends = [...selectedFriends];
 
     try {
-      // Convert captured media to a Blob for upload
       let mediaBlob: Blob;
       if (capturedVideo) {
-        // blob: URL from MediaRecorder — fetch it to get the Blob
         const resp = await fetch(capturedVideo);
         mediaBlob = await resp.blob();
       } else if (capturedImage) {
-        // Compress photo before upload to reduce payload and speed up transfer
-        mediaBlob = await compressImage(capturedImage);
+        const hasDrawings = drawStrokes.length > 0;
+        const hasItems = placedItems.length > 0;
+        const container = previewContainerRef.current;
+        const cw = container?.offsetWidth ?? 400;
+        const ch = container?.offsetHeight ?? 600;
+
+        if (
+          selectedFilter.id !== "normal" ||
+          showTimestampOverlay ||
+          hasDrawings ||
+          hasItems
+        ) {
+          mediaBlob = await bakeImageFull({
+            dataUrl: capturedImage,
+            filter: selectedFilter,
+            showTimestamp: showTimestampOverlay,
+            strokes: drawStrokes,
+            placedItems,
+            containerWidth: cw,
+            containerHeight: ch,
+          });
+        } else {
+          mediaBlob = await compressImage(capturedImage);
+        }
       } else {
         setSending(false);
         return;
       }
 
-      // Reset progress and upload the media to blob-storage, get a permanent hash
       setUploadProgress(0);
       const uploadResult = await backendUploadSnapMedia(mediaBlob, (pct) => {
         setUploadProgress(pct);
@@ -626,18 +1531,13 @@ export function CameraTab() {
       }
 
       const blobId = uploadResult.hash;
-      // Encode isVideo in the content so the receiver can tell which player to use
-      // (backend Message.content is a plain string; no isVideo field exists)
       const snapContent = isVideo
         ? snapCaption?.trim() || "📹 Sent a video snap"
         : snapCaption?.trim() || "📸 Sent a snap";
+      void snapContent;
 
-      // Send snap to each recipient via backend
-      // We piggy-back the video flag by ensuring the content contains "video" for video snaps
-      // The receiver checks msg.content.toLowerCase().includes("video") to pick the right player
       let anyError: string | null = null;
       for (const friend of recipientFriends) {
-        // Pass a synthesized blobId that encodes isVideo: prefix with "v:" for video
         const encodedBlobId = isVideo ? `v:${blobId}` : `p:${blobId}`;
         const result = await backendSendSnap(
           currentUser.username,
@@ -647,11 +1547,7 @@ export function CameraTab() {
           !isEphemeral,
           identity ?? undefined,
         );
-        // Also store content for display — ignore result content, use snapContent
-        void snapContent;
-        if ("err" in result) {
-          anyError = result.err;
-        }
+        if ("err" in result) anyError = result.err;
       }
 
       if (anyError) {
@@ -673,6 +1569,11 @@ export function CameraTab() {
         setCameraState("viewfinder");
         setSelectedFriends([]);
         setSnapCaption("");
+        setSelectedFilterId("normal");
+        setShowTimestampOverlay(false);
+        setDrawStrokes([]);
+        setPlacedItems([]);
+        setPreviewTab("filters");
         startCamera();
         if (recipientFriends.length === 1) {
           setSelectedConversation(recipientFriends[0]);
@@ -696,10 +1597,31 @@ export function CameraTab() {
     setShowSendSheet(false);
     setSendError(null);
     setSnapCaption("");
+    setSelectedFilterId("normal");
+    setShowTimestampOverlay(false);
+    setDrawStrokes([]);
+    setPlacedItems([]);
+    setPreviewTab("filters");
     startCamera();
   };
 
   const isVideoSnap = !!capturedVideo;
+
+  // Preview tab icons
+  const previewTabs: {
+    id: PreviewTab;
+    icon: React.ReactNode;
+    label: string;
+  }[] = [
+    {
+      id: "filters",
+      icon: <span className="text-xs">🎨</span>,
+      label: "Filter",
+    },
+    { id: "draw", icon: <Pen size={13} />, label: "Draw" },
+    { id: "stickers", icon: <StickerIcon size={13} />, label: "Stickers" },
+    { id: "text", icon: <Type size={13} />, label: "Text" },
+  ];
 
   return (
     <div
@@ -719,7 +1641,6 @@ export function CameraTab() {
 
       <AnimatePresence mode="wait">
         {cameraState === "viewfinder" ? (
-          /* ─── VIEWFINDER ─── */
           <motion.div
             key="viewfinder"
             initial={{ opacity: 0 }}
@@ -828,7 +1749,6 @@ export function CameraTab() {
                 </>
               )}
 
-              {/* Recording border */}
               <AnimatePresence>
                 {isRecording && (
                   <motion.div
@@ -841,7 +1761,6 @@ export function CameraTab() {
                 )}
               </AnimatePresence>
 
-              {/* Top controls */}
               <div
                 className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 pt-14 pb-4"
                 style={{
@@ -919,7 +1838,6 @@ export function CameraTab() {
                 )}
               </div>
 
-              {/* Hold hint */}
               <AnimatePresence>
                 {!isRecording && isActive && (
                   <motion.div
@@ -942,7 +1860,6 @@ export function CameraTab() {
                 )}
               </AnimatePresence>
 
-              {/* Bottom controls */}
               <div
                 className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-8 pb-8 pt-4"
                 style={{
@@ -968,7 +1885,6 @@ export function CameraTab() {
                   onChange={handleGalleryUpload}
                 />
 
-                {/* Capture button */}
                 <button
                   type="button"
                   onPointerDown={handleButtonPointerDown}
@@ -1029,8 +1945,9 @@ export function CameraTab() {
             className="absolute inset-0 flex flex-col"
             style={{ background: "#000" }}
           >
-            {/* Media preview -- fills everything except the bottom panel */}
+            {/* Media preview */}
             <div
+              ref={previewContainerRef}
               className="relative flex-1 overflow-hidden"
               style={{ minHeight: 0 }}
             >
@@ -1048,8 +1965,51 @@ export function CameraTab() {
                   src={capturedImage}
                   alt="Snap preview"
                   className="w-full h-full object-cover"
+                  style={{ filter: selectedFilter.css }}
                 />
               ) : null}
+
+              {/* Drawing canvas overlay (only for photos in draw mode) */}
+              {!isVideoSnap && capturedImage && previewTab === "draw" && (
+                <DrawingCanvas
+                  containerRef={previewContainerRef}
+                  strokes={drawStrokes}
+                  onStrokeAdd={(stroke) =>
+                    setDrawStrokes((prev) => [...prev, stroke])
+                  }
+                  currentColor={drawColor}
+                  brushSize={brushSize}
+                />
+              )}
+
+              {/* Placed items overlay (always visible in preview) */}
+              {!isVideoSnap && placedItems.length > 0 && (
+                <PlacedItemsOverlay
+                  items={placedItems}
+                  onMove={handleMoveItem}
+                />
+              )}
+
+              {/* Timestamp overlay preview */}
+              {!isVideoSnap && showTimestampOverlay && (
+                <div
+                  className="absolute bottom-16 right-3 px-3 py-1.5 rounded-full"
+                  style={{ background: "rgba(0,0,0,0.55)", zIndex: 5 }}
+                >
+                  <span className="text-white text-xs font-bold">
+                    {new Date().toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                    {" • "}
+                    {new Date().toLocaleTimeString("en-US", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+              )}
 
               {/* Top bar */}
               <div
@@ -1057,6 +2017,7 @@ export function CameraTab() {
                 style={{
                   background:
                     "linear-gradient(to bottom, rgba(0,0,0,0.55), transparent)",
+                  zIndex: 20,
                 }}
               >
                 <PressableButton
@@ -1096,6 +2057,7 @@ export function CameraTab() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
                     className="absolute bottom-4 left-4 right-4"
+                    style={{ zIndex: 15 }}
                   >
                     <div
                       className="text-center px-4 py-2 rounded-xl"
@@ -1110,14 +2072,93 @@ export function CameraTab() {
               </AnimatePresence>
             </div>
 
-            {/* ── Bottom action panel ── always fixed height, never scrolls away */}
+            {/* Bottom action panel */}
             <div
-              className="flex-shrink-0 flex flex-col gap-3 px-5 pt-4 pb-6"
-              style={{
-                background: "#1A1A2E",
-                borderTop: "1px solid #2A3048",
-              }}
+              className="flex-shrink-0 flex flex-col gap-2 px-5 pt-3 pb-5"
+              style={{ background: "#1A1A2E", borderTop: "1px solid #2A3048" }}
             >
+              {/* Preview tab switcher (photos only) */}
+              {!isVideoSnap && capturedImage && (
+                <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                  {previewTabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setPreviewTab(tab.id)}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold flex-shrink-0 transition-all"
+                      style={{
+                        background:
+                          previewTab === tab.id
+                            ? "rgba(0,207,255,0.15)"
+                            : "rgba(255,255,255,0.06)",
+                        color: previewTab === tab.id ? "#00CFFF" : "#B0B0CC",
+                        border:
+                          previewTab === tab.id
+                            ? "1px solid rgba(0,207,255,0.4)"
+                            : "1px solid transparent",
+                      }}
+                    >
+                      {tab.icon}
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Tab panels */}
+              {!isVideoSnap && capturedImage && (
+                <>
+                  {previewTab === "filters" && (
+                    <div>
+                      <FilterStrip
+                        imageDataUrl={capturedImage}
+                        selectedFilter={selectedFilterId}
+                        onSelect={setSelectedFilterId}
+                      />
+                      {/* Timestamp toggle */}
+                      <div className="flex items-center gap-2 mt-1 mb-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowTimestampOverlay((s) => !s)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                          style={{
+                            background: showTimestampOverlay
+                              ? "rgba(0,207,255,0.15)"
+                              : "rgba(255,255,255,0.06)",
+                            border: showTimestampOverlay
+                              ? "1px solid rgba(0,207,255,0.4)"
+                              : "1px solid rgba(255,255,255,0.1)",
+                            color: showTimestampOverlay ? "#00CFFF" : "#B0B0CC",
+                          }}
+                        >
+                          <Clock size={12} />
+                          Time
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {previewTab === "draw" && (
+                    <DrawingToolbar
+                      selectedColor={drawColor}
+                      onColorChange={setDrawColor}
+                      brushSize={brushSize}
+                      onBrushChange={setBrushSize}
+                      onUndo={() => setDrawStrokes((prev) => prev.slice(0, -1))}
+                      onClear={() => setDrawStrokes([])}
+                    />
+                  )}
+
+                  {previewTab === "stickers" && (
+                    <StickerPanel onPlace={handleAddSticker} />
+                  )}
+
+                  {previewTab === "text" && (
+                    <TextPanel onAddText={handleAddText} />
+                  )}
+                </>
+              )}
+
               {/* Caption input */}
               <div
                 className="flex items-center gap-2 px-4 py-3 rounded-2xl"
@@ -1185,7 +2226,7 @@ export function CameraTab() {
                 )}
               </div>
 
-              {/* Send To button -- always the last thing, always fully visible */}
+              {/* Send To button */}
               <button
                 type="button"
                 onClick={() => {
@@ -1208,7 +2249,6 @@ export function CameraTab() {
         )}
       </AnimatePresence>
 
-      {/* Send To sheet -- rendered via portal to escape overflow clipping */}
       <AnimatePresence>
         {showSendSheet && (
           <SendToSheet
@@ -1225,7 +2265,6 @@ export function CameraTab() {
         )}
       </AnimatePresence>
 
-      {/* AI Snap Assistant -- also via portal */}
       <AnimatePresence>
         {showAiAssistant && (
           <AiSnapAssistant

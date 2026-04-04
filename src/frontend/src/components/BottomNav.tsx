@@ -1,7 +1,11 @@
 import { Camera, MessageCircle, User, Users } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
-import { backendGetPendingRequests } from "../backendStore";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import {
+  backendGetPendingRequestCount,
+  backendGetPendingRequests,
+} from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getUnreadCount } from "../store";
@@ -18,6 +22,9 @@ export function BottomNav() {
   const { identity } = useInternetIdentity();
   const [unreadCount, setUnreadCount] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
+  const prevPendingCount = useRef<number>(-1);
+  // Track request IDs we've already toasted to avoid duplicate notifications
+  const seenRequestIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!currentUser) return;
@@ -26,20 +33,40 @@ export function BottomNav() {
       // Unread messages: still from local store (messages are local)
       setUnreadCount(getUnreadCount(currentUser.username));
 
-      // Pending requests: from backend (mutual system)
-      try {
-        const pending = await backendGetPendingRequests(
-          currentUser.username,
-          identity,
-        );
-        setPendingCount(pending.length);
-      } catch {
-        setPendingCount(0);
+      // Fetch both the count and the actual pending requests in parallel
+      const [count, pendingRequests] = await Promise.all([
+        backendGetPendingRequestCount(currentUser.username, identity),
+        backendGetPendingRequests(currentUser.username, identity),
+      ]);
+
+      setPendingCount(count);
+
+      // Find any new requests we haven't toasted yet
+      if (prevPendingCount.current !== -1) {
+        for (const req of pendingRequests) {
+          if (!seenRequestIds.current.has(req.id)) {
+            const name = req.fromDisplayName || req.fromUser;
+            toast(`${name} wants to connect!`, {
+              style: {
+                background: "#1A1F33",
+                border: "1px solid #00CFFF",
+                color: "#FFFFFF",
+              },
+            });
+          }
+        }
       }
+
+      // Mark all current requests as seen
+      for (const req of pendingRequests) {
+        seenRequestIds.current.add(req.id);
+      }
+
+      prevPendingCount.current = count;
     };
 
     refresh();
-    const interval = setInterval(refresh, 5000);
+    const interval = setInterval(refresh, 2000);
     return () => clearInterval(interval);
   }, [currentUser, identity]);
 
@@ -69,7 +96,7 @@ export function BottomNav() {
             type="button"
             key={item.id}
             onClick={() => setActiveTab(item.id)}
-            className="flex-1 flex flex-col items-center gap-1 py-2 relative"
+            className="flex-1 flex flex-col items-center gap-1 py-2.5 relative"
             aria-current={isActive ? "page" : undefined}
             data-ocid={`nav.${item.id}.link`}
           >
@@ -90,7 +117,7 @@ export function BottomNav() {
                   animate={{ scale: 1 }}
                   className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-white px-0.5"
                   style={{
-                    background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                    background: "#FF3B3B",
                   }}
                 >
                   {badge > 9 ? "9+" : badge}

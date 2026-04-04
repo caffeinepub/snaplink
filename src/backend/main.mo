@@ -43,6 +43,49 @@ actor SnapLink {
     snapViewed : Bool;
   };
 
+  // ── New Feature Types ──────────────────────────────────────────────────────
+
+  type Story = {
+    id : Text;
+    authorUsername : Text;
+    authorDisplayName : Text;
+    blobId : Text;
+    caption : Text;
+    timestamp : Int;
+    expiresAt : Int;
+  };
+
+  type Reaction = {
+    username : Text;
+    emoji : Text;
+    timestamp : Int;
+  };
+
+  type GroupInfo = {
+    id : Text;
+    name : Text;
+    createdBy : Text;
+    members : [Text];
+    createdAt : Int;
+  };
+
+  type GroupMessage = {
+    id : Text;
+    groupId : Text;
+    senderUsername : Text;
+    content : Text;
+    timestamp : Int;
+    isSnap : Bool;
+    snapBlobId : ?Text;
+  };
+
+  type StreakEntry = {
+    user1 : Text;
+    user2 : Text;
+    count : Nat;
+    lastSnapAt : Int;
+  };
+
   // ========== STABLE STATE ==========
   // Using stable vars so data persists across canister upgrades.
 
@@ -53,6 +96,17 @@ actor SnapLink {
   stable var stableMessageCounter : Nat = 0;
   stable var stableRequestCounter : Nat = 0;
 
+  // New feature stable state
+  stable var stableStories : [(Text, Story)] = [];
+  stable var stableReactions : [(Text, [Reaction])] = []; // messageId -> [Reaction]
+  stable var stableGroups : [(Text, GroupInfo)] = [];
+  stable var stableGroupMessages : [(Text, GroupMessage)] = [];
+  stable var stableStreaks : [(Text, StreakEntry)] = []; // "user1:user2" -> StreakEntry
+  stable var stableSnapScores : [(Text, Nat)] = []; // username -> score
+  stable var stableStoryCounter : Nat = 0;
+  stable var stableGroupCounter : Nat = 0;
+  stable var stableGroupMsgCounter : Nat = 0;
+
   // ========== STATE (loaded from stable on init) ==========
 
   var usersByUsername : Map.Map<Text, UserProfile> = Map.fromIter(stableUsersByUsername.vals());
@@ -62,8 +116,18 @@ actor SnapLink {
   var messageCounter : Nat = stableMessageCounter;
   var requestCounter : Nat = stableRequestCounter;
 
+  // New feature state
+  var stories : Map.Map<Text, Story> = Map.fromIter(stableStories.vals());
+  var reactions : Map.Map<Text, [Reaction]> = Map.fromIter(stableReactions.vals());
+  var groups : Map.Map<Text, GroupInfo> = Map.fromIter(stableGroups.vals());
+  var groupMessages : Map.Map<Text, GroupMessage> = Map.fromIter(stableGroupMessages.vals());
+  var streaks : Map.Map<Text, StreakEntry> = Map.fromIter(stableStreaks.vals());
+  var snapScores : Map.Map<Text, Nat> = Map.fromIter(stableSnapScores.vals());
+  var storyCounter : Nat = stableStoryCounter;
+  var groupCounter : Nat = stableGroupCounter;
+  var groupMsgCounter : Nat = stableGroupMsgCounter;
+
   // ========== SYSTEM HOOKS ==========
-  // Save to stable before upgrade, restore after.
 
   system func preupgrade() {
     stableUsersByUsername := [];
@@ -84,6 +148,34 @@ actor SnapLink {
     };
     stableMessageCounter := messageCounter;
     stableRequestCounter := requestCounter;
+
+    stableStories := [];
+    for ((k, v) in stories.entries()) {
+      stableStories := stableStories.concat([(k, v)]);
+    };
+    stableReactions := [];
+    for ((k, v) in reactions.entries()) {
+      stableReactions := stableReactions.concat([(k, v)]);
+    };
+    stableGroups := [];
+    for ((k, v) in groups.entries()) {
+      stableGroups := stableGroups.concat([(k, v)]);
+    };
+    stableGroupMessages := [];
+    for ((k, v) in groupMessages.entries()) {
+      stableGroupMessages := stableGroupMessages.concat([(k, v)]);
+    };
+    stableStreaks := [];
+    for ((k, v) in streaks.entries()) {
+      stableStreaks := stableStreaks.concat([(k, v)]);
+    };
+    stableSnapScores := [];
+    for ((k, v) in snapScores.entries()) {
+      stableSnapScores := stableSnapScores.concat([(k, v)]);
+    };
+    stableStoryCounter := storyCounter;
+    stableGroupCounter := groupCounter;
+    stableGroupMsgCounter := groupMsgCounter;
   };
 
   system func postupgrade() {
@@ -93,6 +185,16 @@ actor SnapLink {
     messages := Map.fromIter(stableMessages.vals());
     messageCounter := stableMessageCounter;
     requestCounter := stableRequestCounter;
+
+    stories := Map.fromIter(stableStories.vals());
+    reactions := Map.fromIter(stableReactions.vals());
+    groups := Map.fromIter(stableGroups.vals());
+    groupMessages := Map.fromIter(stableGroupMessages.vals());
+    streaks := Map.fromIter(stableStreaks.vals());
+    snapScores := Map.fromIter(stableSnapScores.vals());
+    storyCounter := stableStoryCounter;
+    groupCounter := stableGroupCounter;
+    groupMsgCounter := stableGroupMsgCounter;
   };
 
   // ========== HELPERS ==========
@@ -128,8 +230,6 @@ actor SnapLink {
     usersByPrincipal.get(p.toText());
   };
 
-  // Resolve the caller's username.
-  // Priority: explicit callerUsername param (for username/password users) > II principal lookup
   func resolveUsername(callerUsername : Text, caller : Principal) : ?Text {
     if (callerUsername.size() > 0) {
       switch (usersByUsername.get(callerUsername)) {
@@ -140,7 +240,6 @@ actor SnapLink {
     getPrincipalUsername(caller);
   };
 
-  // Check if there's a pending request from user1 to user2
   func hasPendingRequest(fromUser : Text, toUser : Text) : ?ConnectionRequest {
     for ((_, req) in connectionRequests.entries()) {
       switch (req.status) {
@@ -155,10 +254,12 @@ actor SnapLink {
     null;
   };
 
+  func streakKey(u1 : Text, u2 : Text) : Text {
+    if (u1 < u2) u1 # ":" # u2 else u2 # ":" # u1;
+  };
+
   // ========== ADMIN ==========
 
-  // Wipe ALL user data, connections, and messages from the canister.
-  // This is a destructive operation and cannot be undone.
   public func clearAllData() : async { #ok } {
     usersByUsername := Map.empty<Text, UserProfile>();
     usersByPrincipal := Map.empty<Text, Text>();
@@ -166,13 +267,30 @@ actor SnapLink {
     messages := Map.empty<Text, Message>();
     messageCounter := 0;
     requestCounter := 0;
-    // Also clear stable state immediately so it doesn't restore on next upgrade
+    stories := Map.empty<Text, Story>();
+    reactions := Map.empty<Text, [Reaction]>();
+    groups := Map.empty<Text, GroupInfo>();
+    groupMessages := Map.empty<Text, GroupMessage>();
+    streaks := Map.empty<Text, StreakEntry>();
+    snapScores := Map.empty<Text, Nat>();
+    storyCounter := 0;
+    groupCounter := 0;
+    groupMsgCounter := 0;
     stableUsersByUsername := [];
     stableUsersByPrincipal := [];
     stableConnectionRequests := [];
     stableMessages := [];
     stableMessageCounter := 0;
     stableRequestCounter := 0;
+    stableStories := [];
+    stableReactions := [];
+    stableGroups := [];
+    stableGroupMessages := [];
+    stableStreaks := [];
+    stableSnapScores := [];
+    stableStoryCounter := 0;
+    stableGroupCounter := 0;
+    stableGroupMsgCounter := 0;
     #ok;
   };
 
@@ -280,9 +398,6 @@ actor SnapLink {
 
   // ========== CONNECTIONS ==========
 
-  // Mutual-interest friend system:
-  // - Sending a request is invisible to the recipient until they ALSO send a request back
-  // - When both sides have sent requests, the system auto-accepts both -> they become friends
   public shared ({ caller }) func sendConnectionRequest(callerUsername : Text, toUsername : Text) : async { #ok; #err : Text } {
     let fromUsername = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
@@ -293,22 +408,14 @@ actor SnapLink {
       case (null) return #err("User not found");
       case (?_) {};
     };
-
-    // Already friends?
     if (areFriends(fromUsername, toUsername)) return #err("Already friends");
-
-    // Already sent a request in this direction?
     switch (hasPendingRequest(fromUsername, toUsername)) {
       case (?_) return #err("Request already sent");
       case (null) {};
     };
-
-    // Check if the OTHER person already sent a request to us (mutual interest)
     switch (hasPendingRequest(toUsername, fromUsername)) {
       case (?reverseReq) {
-        // Mutual! Accept both requests -> they become friends
         connectionRequests.add(reverseReq.id, { reverseReq with status = #accepted });
-        // Also create the forward request as accepted
         requestCounter += 1;
         let reqId = generateId("req", requestCounter);
         let newReq : ConnectionRequest = {
@@ -322,7 +429,6 @@ actor SnapLink {
         return #ok;
       };
       case (null) {
-        // No reverse request yet — store as pending (invisible to recipient)
         requestCounter += 1;
         let reqId = generateId("req", requestCounter);
         let newReq : ConnectionRequest = {
@@ -353,7 +459,6 @@ actor SnapLink {
     };
   };
 
-  // Returns outgoing pending requests sent BY the caller (so frontend can show "Request Sent" badge)
   public shared ({ caller }) func getSentRequests(callerUsername : Text) : async [ConnectionRequest] {
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
@@ -373,8 +478,6 @@ actor SnapLink {
     results;
   };
 
-  // Returns mutual pending requests visible to the current user for Accept/Decline.
-  // In the mutual system, a request is only visible to the recipient if they also sent one back.
   public shared ({ caller }) func getPendingRequests(callerUsername : Text) : async [ConnectionRequest] {
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
@@ -415,7 +518,7 @@ actor SnapLink {
             else "";
           if (friendUsername != "") {
             switch (seen.get(friendUsername)) {
-              case (?_) {}; // already added
+              case (?_) {};
               case (null) {
                 seen.add(friendUsername, true);
                 switch (usersByUsername.get(friendUsername)) {
@@ -480,6 +583,26 @@ actor SnapLink {
       snapViewed = false;
     };
     messages.add(msgId, msg);
+    // Update snap score for sender
+    let currentScore = switch (snapScores.get(fromUsername)) {
+      case (?s) s;
+      case (null) 0;
+    };
+    snapScores.add(fromUsername, currentScore + 10);
+    // Update streak
+    let key = streakKey(fromUsername, toUsername);
+    let now = Time.now();
+    let twentyFourHours : Int = 86_400_000_000_000; // nanoseconds
+    switch (streaks.get(key)) {
+      case (null) {
+        streaks.add(key, { user1 = fromUsername; user2 = toUsername; count = 1; lastSnapAt = now });
+      };
+      case (?entry) {
+        let elapsed = now - entry.lastSnapAt;
+        let newCount = if (elapsed > twentyFourHours) 1 else entry.count + 1;
+        streaks.add(key, { entry with count = newCount; lastSnapAt = now });
+      };
+    };
     #ok(msg);
   };
 
@@ -616,6 +739,222 @@ actor SnapLink {
       };
     };
     results;
+  };
+
+  // ========== SNAP STORIES ==========
+
+  public shared ({ caller }) func postStory(callerUsername : Text, blobId : Text, caption : Text) : async { #ok; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return #err("Not logged in");
+      case (?u) u;
+    };
+    let profile = switch (usersByUsername.get(username)) {
+      case (null) return #err("User not found");
+      case (?p) p;
+    };
+    storyCounter += 1;
+    let storyId = generateId("story", storyCounter);
+    let now = Time.now();
+    let twentyFourHours : Int = 86_400_000_000_000;
+    let story : Story = {
+      id = storyId;
+      authorUsername = username;
+      authorDisplayName = profile.displayName;
+      blobId;
+      caption;
+      timestamp = now;
+      expiresAt = now + twentyFourHours;
+    };
+    stories.add(storyId, story);
+    #ok;
+  };
+
+  // Returns non-expired stories from friends of the caller
+  public shared ({ caller }) func getFriendStories(callerUsername : Text) : async [Story] {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return [];
+      case (?u) u;
+    };
+    let now = Time.now();
+    var results : [Story] = [];
+    for ((_, story) in stories.entries()) {
+      if (story.expiresAt > now) {
+        // Include own stories + friends' stories
+        if (story.authorUsername == username or areFriends(username, story.authorUsername)) {
+          results := results.concat([story]);
+        };
+      };
+    };
+    results.sort(func(a : Story, b : Story) : { #less; #equal; #greater } {
+      if (a.timestamp < b.timestamp) #less
+      else if (a.timestamp > b.timestamp) #greater
+      else #equal;
+    });
+  };
+
+  // ========== REACTIONS ==========
+
+  public shared ({ caller }) func addReaction(callerUsername : Text, messageId : Text, emoji : Text) : async { #ok; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return #err("Not logged in");
+      case (?u) u;
+    };
+    // Verify message exists
+    switch (messages.get(messageId)) {
+      case (null) return #err("Message not found");
+      case (?_) {};
+    };
+    let existing = switch (reactions.get(messageId)) {
+      case (?r) r;
+      case (null) [];
+    };
+    // Remove existing reaction from this user if any, then add new one
+    var filtered : [Reaction] = [];
+    for (r in existing.vals()) {
+      if (r.username != username) {
+        filtered := filtered.concat([r]);
+      };
+    };
+    let newReaction : Reaction = {
+      username;
+      emoji;
+      timestamp = Time.now();
+    };
+    reactions.add(messageId, filtered.concat([newReaction]));
+    #ok;
+  };
+
+  public query func getReactions(messageId : Text) : async [Reaction] {
+    switch (reactions.get(messageId)) {
+      case (?r) r;
+      case (null) [];
+    };
+  };
+
+  // ========== GROUP CHATS ==========
+
+  public shared ({ caller }) func createGroup(callerUsername : Text, groupName : Text, memberUsernames : [Text]) : async { #ok : GroupInfo; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return #err("Not logged in");
+      case (?u) u;
+    };
+    if (groupName.size() == 0) return #err("Group name cannot be empty");
+    groupCounter += 1;
+    let groupId = generateId("grp", groupCounter);
+    // Ensure creator is always in members
+    var allMembers : [Text] = [username];
+    for (m in memberUsernames.vals()) {
+      if (m != username) {
+        allMembers := allMembers.concat([m]);
+      };
+    };
+    let group : GroupInfo = {
+      id = groupId;
+      name = groupName;
+      createdBy = username;
+      members = allMembers;
+      createdAt = Time.now();
+    };
+    groups.add(groupId, group);
+    #ok(group);
+  };
+
+  public shared ({ caller }) func getGroups(callerUsername : Text) : async [GroupInfo] {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return [];
+      case (?u) u;
+    };
+    var results : [GroupInfo] = [];
+    for ((_, group) in groups.entries()) {
+      for (member in group.members.vals()) {
+        if (member == username) {
+          results := results.concat([group]);
+        };
+      };
+    };
+    results;
+  };
+
+  public shared ({ caller }) func sendGroupMessage(callerUsername : Text, groupId : Text, content : Text) : async { #ok : GroupMessage; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return #err("Not logged in");
+      case (?u) u;
+    };
+    let group = switch (groups.get(groupId)) {
+      case (null) return #err("Group not found");
+      case (?g) g;
+    };
+    // Check membership
+    var isMember = false;
+    for (m in group.members.vals()) {
+      if (m == username) isMember := true;
+    };
+    if (not isMember) return #err("Not a member of this group");
+    groupMsgCounter += 1;
+    let msgId = generateId("gmsg", groupMsgCounter);
+    let msg : GroupMessage = {
+      id = msgId;
+      groupId;
+      senderUsername = username;
+      content;
+      timestamp = Time.now();
+      isSnap = false;
+      snapBlobId = null;
+    };
+    groupMessages.add(msgId, msg);
+    #ok(msg);
+  };
+
+  public shared ({ caller }) func getGroupMessages(callerUsername : Text, groupId : Text, since : Int) : async [GroupMessage] {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return [];
+      case (?u) u;
+    };
+    let group = switch (groups.get(groupId)) {
+      case (null) return [];
+      case (?g) g;
+    };
+    var isMember = false;
+    for (m in group.members.vals()) {
+      if (m == username) isMember := true;
+    };
+    if (not isMember) return [];
+    var results : [GroupMessage] = [];
+    for ((_, msg) in groupMessages.entries()) {
+      if (msg.groupId == groupId and msg.timestamp > since) {
+        results := results.concat([msg]);
+      };
+    };
+    results.sort(func(a : GroupMessage, b : GroupMessage) : { #less; #equal; #greater } {
+      if (a.timestamp < b.timestamp) #less
+      else if (a.timestamp > b.timestamp) #greater
+      else #equal;
+    });
+  };
+
+  // ========== SNAP STREAKS ==========
+
+  public query func getStreak(user1 : Text, user2 : Text) : async Nat {
+    let key = streakKey(user1, user2);
+    let now = Time.now();
+    let twentyFourHours : Int = 86_400_000_000_000;
+    switch (streaks.get(key)) {
+      case (null) 0;
+      case (?entry) {
+        // If streak is expired, return 0
+        if (now - entry.lastSnapAt > twentyFourHours) 0
+        else entry.count;
+      };
+    };
+  };
+
+  // ========== SNAP SCORE ==========
+
+  public query func getSnapScore(username : Text) : async Nat {
+    switch (snapScores.get(username)) {
+      case (?s) s;
+      case (null) 0;
+    };
   };
 
   // ========== BLOB STORAGE (inlined from blob-storage/Mixin) ==========

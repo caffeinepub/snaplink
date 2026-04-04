@@ -81,6 +81,46 @@ export interface MotokoConnectionRequest {
   createdAt: bigint | number;
 }
 
+// ─── Story types ──────────────────────────────────────────────────────────────
+
+export interface Story {
+  id: string;
+  authorUsername: string;
+  authorDisplayName: string;
+  blobId: string;
+  caption: string;
+  timestamp: number;
+  expiresAt: number;
+}
+
+// ─── Reaction types ──────────────────────────────────────────────────────────
+
+export interface Reaction {
+  username: string;
+  emoji: string;
+  timestamp: number;
+}
+
+// ─── Group types ─────────────────────────────────────────────────────────────
+
+export interface GroupInfo {
+  id: string;
+  name: string;
+  createdBy: string;
+  members: string[];
+  createdAt: number;
+}
+
+export interface GroupMessage {
+  id: string;
+  groupId: string;
+  senderUsername: string;
+  content: string;
+  timestamp: number;
+  isSnap: boolean;
+  snapBlobId?: string;
+}
+
 // ─── Conversion helpers ──────────────────────────────────────────────────────
 
 export function moProfileToUser(p: MotokoUserProfile): User {
@@ -117,6 +157,65 @@ export function moRequestToFrontend(
       typeof r.createdAt === "bigint"
         ? Number(r.createdAt) / 1_000_000
         : r.createdAt,
+  };
+}
+
+function moStoryToFrontend(s: any): Story {
+  return {
+    id: String(s.id),
+    authorUsername: String(s.authorUsername),
+    authorDisplayName: String(s.authorDisplayName ?? s.authorUsername),
+    blobId: String(s.blobId ?? ""),
+    caption: String(s.caption ?? ""),
+    timestamp:
+      typeof s.timestamp === "bigint"
+        ? Number(s.timestamp) / 1_000_000
+        : Number(s.timestamp ?? 0),
+    expiresAt:
+      typeof s.expiresAt === "bigint"
+        ? Number(s.expiresAt) / 1_000_000
+        : Number(s.expiresAt ?? 0),
+  };
+}
+
+function moReactionToFrontend(r: any): Reaction {
+  return {
+    username: String(r.username),
+    emoji: String(r.emoji),
+    timestamp:
+      typeof r.timestamp === "bigint"
+        ? Number(r.timestamp) / 1_000_000
+        : Number(r.timestamp ?? 0),
+  };
+}
+
+function moGroupToFrontend(g: any): GroupInfo {
+  return {
+    id: String(g.id),
+    name: String(g.name),
+    createdBy: String(g.createdBy),
+    members: Array.isArray(g.members)
+      ? g.members.map((m: any) => String(m))
+      : [],
+    createdAt:
+      typeof g.createdAt === "bigint"
+        ? Number(g.createdAt) / 1_000_000
+        : Number(g.createdAt ?? 0),
+  };
+}
+
+function moGroupMessageToFrontend(m: any): GroupMessage {
+  return {
+    id: String(m.id),
+    groupId: String(m.groupId),
+    senderUsername: String(m.senderUsername),
+    content: String(m.content ?? ""),
+    timestamp:
+      typeof m.timestamp === "bigint"
+        ? Number(m.timestamp) / 1_000_000
+        : Number(m.timestamp ?? 0),
+    isSnap: Boolean(m.isSnap),
+    snapBlobId: m.snapBlobId?.[0] ? String(m.snapBlobId[0]) : undefined,
   };
 }
 
@@ -351,6 +450,19 @@ export async function backendGetPendingRequests(
   }
 }
 
+/** Fast count of pending requests for this user (any incoming, not just mutual) */
+export async function backendGetPendingRequestCount(
+  callerUsername: string,
+  identity?: Identity,
+): Promise<number> {
+  try {
+    const a = await actor(identity);
+    return Number(await a.getPendingRequestCount(callerUsername));
+  } catch {
+    return 0;
+  }
+}
+
 /** Outgoing requests sent BY this user (to show "Sent" badge) */
 export async function backendGetSentRequests(
   callerUsername: string,
@@ -486,6 +598,165 @@ export async function backendGetConversations(
     return (await a.getConversations(callerUsername)) as any[];
   } catch {
     return [];
+  }
+}
+
+// ─── Stories ─────────────────────────────────────────────────────────────────
+
+export async function backendPostStory(
+  callerUsername: string,
+  blobId: string,
+  caption: string,
+  identity?: Identity,
+): Promise<{ ok: any } | { err: string }> {
+  try {
+    const a = await actor(identity);
+    const result = await a.postStory(callerUsername, blobId, caption);
+    if ("ok" in result) return { ok: result.ok };
+    return { err: result.err };
+  } catch (e) {
+    return { err: sanitizeError(e) };
+  }
+}
+
+export async function backendGetFriendStories(
+  callerUsername: string,
+  identity?: Identity,
+): Promise<Story[]> {
+  try {
+    const a = await actor(identity);
+    const results = await a.getFriendStories(callerUsername);
+    return (results as any[]).map(moStoryToFrontend);
+  } catch {
+    return [];
+  }
+}
+
+// ─── Reactions ───────────────────────────────────────────────────────────────
+
+export async function backendAddReaction(
+  callerUsername: string,
+  messageId: string,
+  emoji: string,
+  identity?: Identity,
+): Promise<{ ok: any } | { err: string }> {
+  try {
+    const a = await actor(identity);
+    const result = await a.addReaction(callerUsername, messageId, emoji);
+    if ("ok" in result) return { ok: result.ok };
+    return { err: result.err };
+  } catch (e) {
+    return { err: sanitizeError(e) };
+  }
+}
+
+export async function backendGetReactions(
+  messageId: string,
+): Promise<Reaction[]> {
+  try {
+    const a = await anonActor();
+    const results = await a.getReactions(messageId);
+    return (results as any[]).map(moReactionToFrontend);
+  } catch {
+    return [];
+  }
+}
+
+// ─── Groups ──────────────────────────────────────────────────────────────────
+
+export async function backendCreateGroup(
+  callerUsername: string,
+  groupName: string,
+  memberUsernames: string[],
+  identity?: Identity,
+): Promise<{ ok: GroupInfo } | { err: string }> {
+  try {
+    const a = await actor(identity);
+    const result = await a.createGroup(
+      callerUsername,
+      groupName,
+      memberUsernames,
+    );
+    if ("ok" in result) return { ok: moGroupToFrontend(result.ok) };
+    return { err: result.err };
+  } catch (e) {
+    return { err: sanitizeError(e) };
+  }
+}
+
+export async function backendGetGroups(
+  callerUsername: string,
+  identity?: Identity,
+): Promise<GroupInfo[]> {
+  try {
+    const a = await actor(identity);
+    const results = await a.getGroups(callerUsername);
+    return (results as any[]).map(moGroupToFrontend);
+  } catch {
+    return [];
+  }
+}
+
+export async function backendSendGroupMessage(
+  callerUsername: string,
+  groupId: string,
+  content: string,
+  identity?: Identity,
+): Promise<{ ok: GroupMessage } | { err: string }> {
+  try {
+    const a = await actor(identity);
+    const result = await a.sendGroupMessage(callerUsername, groupId, content);
+    if ("ok" in result) return { ok: moGroupMessageToFrontend(result.ok) };
+    return { err: result.err };
+  } catch (e) {
+    return { err: sanitizeError(e) };
+  }
+}
+
+export async function backendGetGroupMessages(
+  callerUsername: string,
+  groupId: string,
+  since: number,
+  identity?: Identity,
+): Promise<GroupMessage[]> {
+  try {
+    const a = await actor(identity);
+    const results = await a.getGroupMessages(
+      callerUsername,
+      groupId,
+      BigInt(since),
+    );
+    return (results as any[]).map(moGroupMessageToFrontend);
+  } catch {
+    return [];
+  }
+}
+
+// ─── Streaks ─────────────────────────────────────────────────────────────────
+
+export async function backendGetStreak(
+  user1: string,
+  user2: string,
+): Promise<number> {
+  try {
+    const a = await anonActor();
+    return Number(await a.getStreak(user1, user2));
+  } catch {
+    return 0;
+  }
+}
+
+// ─── Snap Score ──────────────────────────────────────────────────────────────
+
+export async function backendGetSnapScore(
+  username: string,
+  identity?: Identity,
+): Promise<number> {
+  try {
+    const a = await actor(identity);
+    return Number(await a.getSnapScore(username));
+  } catch {
+    return 0;
   }
 }
 
