@@ -1,0 +1,226 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  src: url("/assets/fonts/PlusJakartaSans.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 0.75rem;
+    /* Dark mode only - SnapLink is dark-first */
+    --background: 14.8 3.8 255;
+    --foreground: 1 0 0;
+    --card: 14.1 4.2 255;
+    --card-foreground: 1 0 0;
+    --popover: 14.1 4.2 255;
+    --popover-foreground: 1 0 0;
+    --primary: 0.82 0.18 210;
+    --primary-foreground: 0.08 0.05 255;
+    --secondary: 16.5 4 255;
+    --secondary-foreground: 0.85 0.02 255;
+    --muted: 16.5 4 255;
+    --muted-foreground: 0.69 0.04 264;
+    --accent: 0.82 0.18 210;
+    --accent-foreground: 0.08 0.05 255;
+    --destructive: 0.577 0.245 27.325;
+    --destructive-foreground: 0.985 0 0;
+    --border: 20 4.5 255;
+    --input: 20 4.5 255;
+    --ring: 0.82 0.18 210;
+    --chart-1: 0.82 0.18 210;
+    --chart-2: 0.62 0.22 305;
+    --chart-3: 0.69 0.04 264;
+    --chart-4: 0.77 0.14 168;
+    --chart-5: 0.7 0.19 45;
+    --sidebar: 14.1 4.2 255;
+    --sidebar-foreground: 1 0 0;
+    --sidebar-primary: 0.82 0.18 210;
+    --sidebar-primary-foreground: 0.08 0.05 255;
+    --sidebar-accent: 16.5 4 255;
+    --sidebar-accent-foreground: 0.85 0.02 255;
+    --sidebar-border: 20 4.5 255;
+    --sidebar-ring: 0.82 0.18 210;
+  }
+
+  .dark {
+    --background: 14.8 3.8 255;
+    --foreground: 1 0 0;
+    --card: 14.1 4.2 255;
+    --card-foreground: 1 0 0;
+    --popover: 14.1 4.2 255;
+    --popover-foreground: 1 0 0;
+    --primary: 0.82 0.18 210;
+    --primary-foreground: 0.08 0.05 255;
+    --secondary: 16.5 4 255;
+    --secondary-foreground: 0.85 0.02 255;
+    --muted: 16.5 4 255;
+    --muted-foreground: 0.69 0.04 264;
+    --accent: 0.82 0.18 210;
+    --accent-foreground: 0.08 0.05 255;
+    --destructive: 0.577 0.245 27.325;
+    --destructive-foreground: 0.985 0 0;
+    --border: 20 4.5 255;
+    --input: 20 4.5 255;
+    --ring: 0.82 0.18 210;
+    --chart-1: 0.82 0.18 210;
+    --chart-2: 0.62 0.22 305;
+    --chart-3: 0.69 0.04 264;
+    --chart-4: 0.77 0.14 168;
+    --chart-5: 0.7 0.19 45;
+    --sidebar: 14.1 4.2 255;
+    --sidebar-foreground: 1 0 0;
+    --sidebar-primary: 0.82 0.18 210;
+    --sidebar-primary-foreground: 0.08 0.05 255;
+    --sidebar-accent: 16.5 4 255;
+    --sidebar-accent-foreground: 0.85 0.02 255;
+    --sidebar-border: 20 4.5 255;
+    --sidebar-ring: 0.82 0.18 210;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: #1a1a2e;
+    color: #ffffff;
+    font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #00cfff, #bd00ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .bg-gradient-brand {
+    background: linear-gradient(135deg, #00cfff, #bd00ff);
+  }
+
+  .border-gradient-brand {
+    border-image: linear-gradient(135deg, #00cfff, #bd00ff) 1;
+  }
+
+  .btn-glow-blue {
+    background: linear-gradient(135deg, #00cfff, #0099cc);
+    box-shadow: 0 0 20px rgba(0, 207, 255, 0.4), 0 4px 15px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+  }
+
+  .btn-glow-blue:hover {
+    box-shadow: 0 0 30px rgba(0, 207, 255, 0.6), 0 4px 20px rgba(0, 0, 0, 0.4);
+    transform: translateY(-1px);
+  }
+
+  .btn-glow-blue:active {
+    transform: scale(0.95);
+    box-shadow: 0 0 15px rgba(0, 207, 255, 0.3);
+  }
+
+  .btn-decline {
+    background: transparent;
+    border: 1.5px solid rgba(189, 0, 255, 0.6);
+    color: #bd00ff;
+    transition: all 0.2s ease;
+  }
+
+  .btn-decline:hover {
+    background: rgba(189, 0, 255, 0.1);
+    border-color: #bd00ff;
+    box-shadow: 0 0 15px rgba(189, 0, 255, 0.3);
+  }
+
+  .btn-decline:active {
+    transform: scale(0.95);
+  }
+
+  .card-surface {
+    background-color: #1a1f33;
+    border: 1px solid #2a3048;
+    border-radius: 16px;
+  }
+
+  .nav-glow {
+    box-shadow: 0 -1px 0 rgba(42, 48, 72, 0.8), 0 -8px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  .message-bubble-sent {
+    background: linear-gradient(135deg, #00cfff, #0099cc);
+    border-radius: 18px 18px 4px 18px;
+    box-shadow: 0 2px 8px rgba(0, 207, 255, 0.3);
+  }
+
+  .message-bubble-received {
+    background-color: #1a1f33;
+    border: 1px solid #2a3048;
+    border-radius: 18px 18px 18px 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .snap-timer-ring {
+    stroke-dasharray: 220;
+    stroke-dashoffset: 0;
+    animation: timer-drain linear forwards;
+    transform-origin: center;
+    transform: rotate(-90deg);
+  }
+
+  @keyframes timer-drain {
+    from {
+      stroke-dashoffset: 0;
+    }
+    to {
+      stroke-dashoffset: 220;
+    }
+  }
+
+  .avatar-gradient {
+    background: linear-gradient(135deg, #00cfff, #bd00ff);
+  }
+
+  .input-field {
+    background-color: #1a1f33;
+    border: 1px solid #2a3048;
+    color: #ffffff;
+    border-radius: 12px;
+    padding: 12px 16px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  }
+
+  .input-field::placeholder {
+    color: #b0b0cc;
+  }
+
+  .input-field:focus {
+    border-color: #00cfff;
+    box-shadow: 0 0 0 3px rgba(0, 207, 255, 0.15);
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
