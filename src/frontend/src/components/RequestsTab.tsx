@@ -1,14 +1,22 @@
-import { CheckCircle, Search, UserPlus, Users } from "lucide-react";
+import {
+  CheckCircle,
+  Search,
+  UserCheck,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import {
   getPendingRequests,
   respondToRequest,
-  searchUsers,
+  searchUsersWithStatus,
   sendConnectionRequest,
 } from "../store";
-import type { ConnectionRequest, User } from "../types";
+import type { UserWithStatus } from "../store";
+import type { ConnectionRequest } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
 
 function RequestCard({
@@ -88,96 +96,301 @@ function RequestCard({
   );
 }
 
-function FindPeopleSection() {
+function UserStatusBadge({
+  user,
+  onAction,
+}: {
+  user: UserWithStatus;
+  onAction: (
+    user: UserWithStatus,
+    action: "add" | "accept" | "decline",
+  ) => void;
+}) {
+  if (user.connectionStatus === "friends") {
+    return (
+      <div
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+        style={{
+          background: "rgba(0,200,130,0.12)",
+          border: "1px solid rgba(0,200,130,0.3)",
+        }}
+      >
+        <UserCheck size={13} color="#00C882" />
+        <span className="text-[#00C882] text-xs font-semibold">Friends</span>
+      </div>
+    );
+  }
+
+  if (user.connectionStatus === "pending_sent") {
+    return (
+      <div
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+        style={{
+          background: "rgba(0,207,255,0.08)",
+          border: "1px solid rgba(0,207,255,0.25)",
+        }}
+      >
+        <span className="text-[#00CFFF] text-xs font-semibold">
+          Request Sent
+        </span>
+      </div>
+    );
+  }
+
+  if (user.connectionStatus === "pending_received") {
+    return (
+      <div className="flex items-center gap-1.5">
+        <motion.button
+          type="button"
+          whileTap={{ scale: 0.93 }}
+          onClick={() => onAction(user, "decline")}
+          className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
+          style={{
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+          aria-label="Decline request"
+          data-ocid="requests.secondary_button"
+        >
+          <X size={14} color="#B0B0CC" />
+        </motion.button>
+        <motion.button
+          type="button"
+          whileTap={{ scale: 0.93 }}
+          onClick={() => onAction(user, "accept")}
+          className="px-3 py-1.5 rounded-full text-xs font-bold text-white"
+          style={{
+            background: "rgba(0,207,255,0.15)",
+            border: "1px solid rgba(0,207,255,0.5)",
+            animation: "pulse-accept 2s ease-in-out infinite",
+          }}
+          data-ocid="requests.primary_button"
+        >
+          Accept
+        </motion.button>
+      </div>
+    );
+  }
+
+  // none — show Add Friend
+  return (
+    <PressableButton
+      onClick={() => onAction(user, "add")}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white"
+      style={{
+        background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+        boxShadow: "0 0 12px rgba(0,207,255,0.25)",
+      }}
+      data-ocid="requests.primary_button"
+    >
+      <UserPlus size={13} />
+      <span>Add</span>
+    </PressableButton>
+  );
+}
+
+function FindPeopleSection({
+  onRefreshPending,
+}: { onRefreshPending: () => void }) {
   const { currentUser } = useApp();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<User[]>([]);
-  const [sentMap, setSentMap] = useState<Record<string, boolean>>({});
-  const [errorMap, setErrorMap] = useState<Record<string, string>>({});
+  const [users, setUsers] = useState<UserWithStatus[]>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (query.trim() && currentUser) {
-      setResults(searchUsers(query, currentUser.id));
+  const refresh = useCallback(() => {
+    if (!currentUser) return;
+    const results = searchUsersWithStatus(query, currentUser);
+    // For default view, exclude friends and limit to 10
+    if (!query.trim()) {
+      setUsers(
+        results.filter((u) => u.connectionStatus !== "friends").slice(0, 10),
+      );
     } else {
-      setResults([]);
+      setUsers(results);
     }
   }, [query, currentUser]);
 
-  const handleSendRequest = (toUsername: string) => {
-    if (!currentUser) return;
-    const result = sendConnectionRequest(currentUser, toUsername);
-    if ("ok" in result) {
-      setSentMap((prev) => ({ ...prev, [toUsername]: true }));
-    } else {
-      setErrorMap((prev) => ({ ...prev, [toUsername]: result.err }));
-    }
-  };
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const handleAction = useCallback(
+    (user: UserWithStatus, action: "add" | "accept" | "decline") => {
+      if (!currentUser) return;
+
+      if (action === "add") {
+        sendConnectionRequest(currentUser, user.username);
+      } else if (action === "accept" && user.requestId) {
+        respondToRequest(user.requestId, true);
+        onRefreshPending();
+      } else if (action === "decline" && user.requestId) {
+        respondToRequest(user.requestId, false);
+        onRefreshPending();
+      }
+      // Refresh the list
+      setTimeout(() => refresh(), 50);
+    },
+    [currentUser, refresh, onRefreshPending],
+  );
+
+  const isEmptySearch = !query.trim();
+  const allConnected = isEmptySearch && users.length === 0;
 
   return (
     <div className="mt-6">
-      <p className="text-white font-bold text-lg mb-3">Find People</p>
-      <div className="relative">
+      {/* Section header */}
+      <div className="flex items-center gap-2 mb-4">
+        <Users size={18} color="#00CFFF" />
+        <p className="text-white font-bold text-lg">Find People</p>
+      </div>
+
+      {/* Search input */}
+      <div
+        className="relative mb-4"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          borderRadius: 16,
+          border: "1px solid rgba(255,255,255,0.08)",
+        }}
+      >
         <Search
-          size={16}
-          className="absolute left-3.5 top-1/2 -translate-y-1/2"
+          size={15}
+          className="absolute left-4 top-1/2 -translate-y-1/2"
           color="#B0B0CC"
         />
         <input
-          className="input-field pl-10"
-          placeholder="Search by username or name..."
+          ref={searchInputRef}
+          className="w-full bg-transparent text-white text-sm pl-10 pr-10 py-3 outline-none placeholder-[#B0B0CC]"
+          placeholder="Search by name or @username..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           data-ocid="requests.search_input"
         />
+        {query && (
+          <button
+            type="button"
+            onClick={() => setQuery("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(255,255,255,0.1)" }}
+            aria-label="Clear search"
+          >
+            <X size={12} color="#B0B0CC" />
+          </button>
+        )}
       </div>
 
-      <AnimatePresence>
-        {results.map((user, i) => (
+      {/* Section title */}
+      {!query.trim() && users.length > 0 && (
+        <p className="text-[#B0B0CC] text-xs font-semibold uppercase tracking-wider mb-3 px-1">
+          People You May Know
+        </p>
+      )}
+      {query.trim() && users.length > 0 && (
+        <p className="text-[#B0B0CC] text-xs font-semibold uppercase tracking-wider mb-3 px-1">
+          {users.length} result{users.length !== 1 ? "s" : ""} for "{query}"
+        </p>
+      )}
+
+      {/* User list */}
+      <AnimatePresence mode="popLayout">
+        {allConnected ? (
           <motion.div
-            key={user.id}
+            key="all-connected"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ delay: i * 0.04 }}
-            className="card-surface p-3.5 mt-3 flex items-center gap-3"
-            data-ocid={`requests.item.${i + 1}`}
+            exit={{ opacity: 0 }}
+            className="flex flex-col items-center justify-center py-10 gap-3"
+            data-ocid="requests.empty_state"
           >
-            <UserAvatar
-              name={user.displayName}
-              size={44}
-              avatarUrl={user.avatarUrl}
-            />
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-semibold text-sm truncate">
-                {user.displayName}
-              </p>
-              <p className="text-[#B0B0CC] text-xs">@{user.username}</p>
+            <div
+              className="w-14 h-14 rounded-full flex items-center justify-center"
+              style={{
+                background:
+                  "linear-gradient(135deg, rgba(0,207,255,0.15), rgba(189,0,255,0.15))",
+                border: "1px solid rgba(0,207,255,0.2)",
+              }}
+            >
+              <UserCheck size={24} color="#00CFFF" />
             </div>
-            {sentMap[user.username] ? (
-              <div className="flex items-center gap-1.5">
-                <CheckCircle size={16} color="#00CFFF" />
-                <span className="text-[#00CFFF] text-xs font-medium">Sent</span>
-              </div>
-            ) : errorMap[user.username] ? (
-              <span className="text-[#B0B0CC] text-xs">
-                {errorMap[user.username]}
-              </span>
-            ) : (
-              <PressableButton
-                onClick={() => handleSendRequest(user.username)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold text-white"
-                style={{
-                  background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
-                }}
-                data-ocid="requests.primary_button"
-              >
-                <UserPlus size={14} />
-                <span>Connect</span>
-              </PressableButton>
-            )}
+            <p className="text-white font-semibold text-sm">
+              You&apos;re all connected!
+            </p>
+            <p className="text-[#B0B0CC] text-xs text-center">
+              You&apos;re connected with everyone 🎉
+            </p>
           </motion.div>
-        ))}
+        ) : query.trim() && users.length === 0 ? (
+          <motion.div
+            key="no-results"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="flex flex-col items-center justify-center py-8 gap-2"
+          >
+            <Search size={28} color="#2A3048" />
+            <p className="text-[#B0B0CC] text-sm">
+              No users found for &quot;{query}&quot;
+            </p>
+          </motion.div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {users.map((user, i) => (
+              <motion.div
+                key={user.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                transition={{ delay: i * 0.04 }}
+                className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                }}
+                data-ocid={`requests.item.${i + 1}`}
+              >
+                <UserAvatar
+                  name={user.displayName}
+                  size={46}
+                  avatarUrl={user.avatarUrl}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-semibold text-sm truncate">
+                    {user.displayName}
+                  </p>
+                  <p className="text-[#B0B0CC] text-xs truncate">
+                    @{user.username}
+                  </p>
+                  {user.bio && (
+                    <p
+                      className="text-[#B0B0CC] text-xs mt-0.5 leading-relaxed"
+                      style={{
+                        display: "-webkit-box",
+                        WebkitLineClamp: 1,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                        maxWidth: "100%",
+                      }}
+                    >
+                      {user.bio.slice(0, 60)}
+                      {user.bio.length > 60 ? "..." : ""}
+                    </p>
+                  )}
+                </div>
+                <div className="flex-shrink-0">
+                  <UserStatusBadge user={user} onAction={handleAction} />
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
       </AnimatePresence>
+
+      <style>{`
+        @keyframes pulse-accept {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(0,207,255,0.4); }
+          50% { box-shadow: 0 0 0 4px rgba(0,207,255,0.0); }
+        }
+      `}</style>
     </div>
   );
 }
@@ -234,14 +447,14 @@ export function RequestsTab() {
       <div className="px-5 flex flex-col gap-3">
         {requests.length === 0 ? (
           <div
-            className="flex flex-col items-center justify-center gap-3 py-10"
+            className="flex flex-col items-center justify-center gap-3 py-6"
             data-ocid="requests.empty_state"
           >
             <div
-              className="w-16 h-16 rounded-full flex items-center justify-center"
+              className="w-14 h-14 rounded-full flex items-center justify-center"
               style={{ background: "#1A1F33", border: "1px solid #2A3048" }}
             >
-              <Users size={28} color="#B0B0CC" />
+              <Users size={24} color="#B0B0CC" />
             </div>
             <p className="text-[#B0B0CC] text-sm">No pending requests</p>
           </div>
@@ -257,7 +470,7 @@ export function RequestsTab() {
           </AnimatePresence>
         )}
 
-        <FindPeopleSection />
+        <FindPeopleSection onRefreshPending={refresh} />
       </div>
 
       <div className="h-8" />

@@ -10,12 +10,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
-import {
-  getFriends,
-  getUsers,
-  setCurrentUser as persistUser,
-  updateUserProfile,
-} from "../store";
+import { getFriends, updateUserProfile } from "../store";
 import type { User } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
 
@@ -42,12 +37,7 @@ export function ProfileTab() {
     if (!currentUser) return;
     setSaving(true);
     updateUserProfile(currentUser.id, displayName, bio, avatarUrl);
-    const users = getUsers();
-    const updated = users.find((u) => u.id === currentUser.id);
-    if (updated) {
-      persistUser(updated);
-      refreshUser();
-    }
+    refreshUser();
     setSaving(false);
     setEditing(false);
   };
@@ -70,12 +60,7 @@ export function ProfileTab() {
         currentUser.bio,
         dataUrl,
       );
-      const users = getUsers();
-      const updated = users.find((u) => u.id === currentUser.id);
-      if (updated) {
-        persistUser(updated);
-        refreshUser();
-      }
+      refreshUser();
     };
     reader.readAsDataURL(file);
   };

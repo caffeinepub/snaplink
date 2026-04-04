@@ -49,7 +49,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(() => {
     const user = getCurrentUser();
-    setUser(user);
+    setUser(user ? { ...user } : null);
   }, []);
 
   return (

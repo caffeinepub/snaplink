@@ -2,18 +2,21 @@ import {
   ChevronDown,
   Clock,
   Send,
+  Sparkles,
   SwitchCamera,
   Upload,
+  Video,
   X,
   Zap,
   ZapOff,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useCamera } from "../camera/useCamera";
 import { useApp } from "../context/AppContext";
 import { getFriends, sendSnap } from "../store";
 import type { User } from "../types";
+import { AiSnapAssistant } from "./AiSnapAssistant";
 import { PressableButton, UserAvatar } from "./Shared";
 
 type CameraState = "viewfinder" | "preview";
@@ -94,6 +97,38 @@ function SnapTimer({
       >
         {Math.ceil(remaining)}
       </span>
+    </div>
+  );
+}
+
+// Recording duration timer
+function RecordingTimer({ startTime }: { startTime: number }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTime) / 1000));
+    }, 500);
+    return () => clearInterval(interval);
+  }, [startTime]);
+
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const label = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-1.5 rounded-full"
+      style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
+    >
+      <div
+        className="w-2 h-2 rounded-full"
+        style={{
+          background: "#FF3B3B",
+          animation: "pulse-rec 1s ease-in-out infinite",
+        }}
+      />
+      <span className="text-white text-sm font-bold tabular-nums">{label}</span>
     </div>
   );
 }
@@ -321,6 +356,7 @@ export function CameraTab() {
   const { currentUser, setActiveTab, setSelectedConversation } = useApp();
   const [cameraState, setCameraState] = useState<CameraState>("viewfinder");
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [capturedVideo, setCapturedVideo] = useState<string | null>(null);
   const [flashOn, setFlashOn] = useState(false);
   const [isEphemeral, setIsEphemeral] = useState(true);
   const [timerDuration, setTimerDuration] = useState(5);
@@ -330,7 +366,16 @@ export function CameraTab() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [showSendSheet, setShowSendSheet] = useState(false);
+  const [showAiAssistant, setShowAiAssistant] = useState(false);
+  const [snapCaption, setSnapCaption] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingStartTime, setRecordingStartTime] = useState<number | null>(
+    null,
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const pressStartTimeRef = useRef<number>(0);
 
   const {
     isActive,
@@ -356,6 +401,10 @@ export function CameraTab() {
     startCamera();
     return () => {
       stopCamera();
+      // Revoke any video blob URL on unmount
+      if (capturedVideo) {
+        URL.revokeObjectURL(capturedVideo);
+      }
     };
   }, []);
 
@@ -371,16 +420,117 @@ export function CameraTab() {
     reader.readAsDataURL(file);
   };
 
+  const startRecording = useCallback(() => {
+    const stream = videoRef.current?.srcObject as MediaStream | null;
+    if (!stream || !isActive) return;
+
+    recordedChunksRef.current = [];
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+      ? "video/webm;codecs=vp9"
+      : MediaRecorder.isTypeSupported("video/webm")
+        ? "video/webm"
+        : "video/mp4";
+
+    try {
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          recordedChunksRef.current.push(e.data);
+        }
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        setCapturedVideo(url);
+        setCapturedImage(null);
+        setCameraState("preview");
+        stopCamera();
+      };
+      recorder.start(100);
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingStartTime(Date.now());
+    } catch (e) {
+      console.warn("MediaRecorder failed:", e);
+    }
+  }, [isActive, videoRef, stopCamera]);
+
+  const stopRecording = useCallback(() => {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    setRecordingStartTime(null);
+  }, []);
+
+  const handlePointerUp = useCallback(() => {
+    const pressDuration = Date.now() - pressStartTimeRef.current;
+    if (isRecording) {
+      stopRecording();
+    } else if (pressDuration < 200) {
+      // Short press = photo
+      handleCapture();
+    } else {
+      // Long press but not yet recording (edge case: race condition)
+      handleCapture();
+    }
+    // biome-ignore lint/correctness/useExhaustiveDependencies: handleCapture is stable (uses refs internally)
+  }, [isRecording, stopRecording, handleCapture]);
+
+  const handlePointerLeave = useCallback(() => {
+    if (isRecording) {
+      stopRecording();
+    }
+  }, [isRecording, stopRecording]);
+
+  // Start recording after 200ms hold
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleButtonPointerDown = useCallback(() => {
+    pressStartTimeRef.current = Date.now();
+    holdTimerRef.current = setTimeout(() => {
+      startRecording();
+    }, 200);
+  }, [startRecording]);
+
+  const handleButtonPointerUp = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    handlePointerUp();
+  }, [handlePointerUp]);
+
+  const handleButtonPointerLeave = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    handlePointerLeave();
+  }, [handlePointerLeave]);
+
   const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setCapturedImage(reader.result as string);
+    if (file.type.startsWith("video/")) {
+      const url = URL.createObjectURL(file);
+      setCapturedVideo(url);
+      setCapturedImage(null);
       setCameraState("preview");
       stopCamera();
-    };
-    reader.readAsDataURL(file);
+    } else {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setCapturedImage(reader.result as string);
+        setCapturedVideo(null);
+        setCameraState("preview");
+        stopCamera();
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleToggleFriend = (username: string) => {
@@ -392,20 +542,37 @@ export function CameraTab() {
   };
 
   const handleSendSnap = async () => {
-    if (!currentUser || !capturedImage || selectedFriends.length === 0) return;
+    if (!currentUser || selectedFriends.length === 0) return;
+    const snapData = capturedVideo || capturedImage;
+    if (!snapData) return;
     setSending(true);
+    const isVideo = !!capturedVideo;
     try {
       for (const friend of selectedFriends) {
-        sendSnap(currentUser, friend, capturedImage, isEphemeral, !isEphemeral);
+        sendSnap(
+          currentUser,
+          friend,
+          snapData,
+          isEphemeral,
+          !isEphemeral,
+          snapCaption || undefined,
+          isVideo,
+        );
       }
       setSent(true);
       setTimeout(() => {
         setSent(false);
         setSending(false);
         setShowSendSheet(false);
+        // Revoke video blob URL
+        if (capturedVideo) {
+          URL.revokeObjectURL(capturedVideo);
+        }
         setCapturedImage(null);
+        setCapturedVideo(null);
         setCameraState("viewfinder");
         setSelectedFriends([]);
+        setSnapCaption("");
         startCamera();
         if (selectedFriends.length === 1) {
           setSelectedConversation(selectedFriends[0]);
@@ -420,20 +587,39 @@ export function CameraTab() {
   };
 
   const handleDiscard = () => {
+    if (capturedVideo) {
+      URL.revokeObjectURL(capturedVideo);
+    }
     setCapturedImage(null);
+    setCapturedVideo(null);
     setCameraState("viewfinder");
     setSelectedFriends([]);
     setShowSendSheet(false);
+    setSnapCaption("");
     startCamera();
   };
 
   const handleNoExpiry = () => {};
+
+  const isVideoSnap = !!capturedVideo;
 
   return (
     <div
       className="relative flex flex-col h-full overflow-hidden"
       style={{ background: "#000000" }}
     >
+      {/* Inject recording pulse animation */}
+      <style>{`
+        @keyframes pulse-rec {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(0.85); }
+        }
+        @keyframes recording-ring {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255,59,59,0.7), 0 0 0 6px rgba(255,59,59,0.2); }
+          50% { box-shadow: 0 0 0 8px rgba(255,59,59,0.0), 0 0 0 14px rgba(255,59,59,0.1); }
+        }
+      `}</style>
+
       <AnimatePresence mode="wait">
         {cameraState === "viewfinder" ? (
           <motion.div
@@ -537,6 +723,19 @@ export function CameraTab() {
                 </>
               )}
 
+              {/* Recording overlay indicator */}
+              <AnimatePresence>
+                {isRecording && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 pointer-events-none"
+                    style={{ border: "3px solid #FF3B3B" }}
+                  />
+                )}
+              </AnimatePresence>
+
               {/* Top controls */}
               <div
                 className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 pt-14 pb-4"
@@ -561,58 +760,86 @@ export function CameraTab() {
                   )}
                 </PressableButton>
 
-                <div className="relative">
-                  <PressableButton
-                    onClick={() => setShowTimerPicker((s) => !s)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-full"
-                    style={{
-                      background: "rgba(255,255,255,0.15)",
-                      backdropFilter: "blur(8px)",
-                    }}
-                    data-ocid="camera.toggle"
-                  >
-                    <Clock size={16} color="white" />
-                    <span className="text-white text-sm font-semibold">
-                      {timerDuration}s
-                    </span>
-                    <ChevronDown size={14} color="white" />
-                  </PressableButton>
-                  <AnimatePresence>
-                    {showTimerPicker && (
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.9, y: -4 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.9 }}
-                        className="absolute top-full mt-2 right-0 rounded-2xl overflow-hidden z-10"
-                        style={{
-                          background: "rgba(26,31,51,0.95)",
-                          border: "1px solid #2A3048",
-                          backdropFilter: "blur(12px)",
-                        }}
-                        data-ocid="camera.popover"
-                      >
-                        {[3, 5, 10, 30].map((t) => (
-                          <button
-                            type="button"
-                            key={t}
-                            onClick={() => {
-                              setTimerDuration(t);
-                              setShowTimerPicker(false);
-                            }}
-                            className="block w-full px-6 py-3 text-sm font-medium text-left transition-colors hover:bg-[#2A3048]"
-                            style={{
-                              color:
-                                timerDuration === t ? "#00CFFF" : "#FFFFFF",
-                            }}
-                          >
-                            {t}s
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                {/* Recording timer or snap timer picker */}
+                {isRecording && recordingStartTime ? (
+                  <RecordingTimer startTime={recordingStartTime} />
+                ) : (
+                  <div className="relative">
+                    <PressableButton
+                      onClick={() => setShowTimerPicker((s) => !s)}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full"
+                      style={{
+                        background: "rgba(255,255,255,0.15)",
+                        backdropFilter: "blur(8px)",
+                      }}
+                      data-ocid="camera.toggle"
+                    >
+                      <Clock size={16} color="white" />
+                      <span className="text-white text-sm font-semibold">
+                        {timerDuration}s
+                      </span>
+                      <ChevronDown size={14} color="white" />
+                    </PressableButton>
+                    <AnimatePresence>
+                      {showTimerPicker && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.9, y: -4 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.9 }}
+                          className="absolute top-full mt-2 right-0 rounded-2xl overflow-hidden z-10"
+                          style={{
+                            background: "rgba(26,31,51,0.95)",
+                            border: "1px solid #2A3048",
+                            backdropFilter: "blur(12px)",
+                          }}
+                          data-ocid="camera.popover"
+                        >
+                          {[3, 5, 10, 30].map((t) => (
+                            <button
+                              type="button"
+                              key={t}
+                              onClick={() => {
+                                setTimerDuration(t);
+                                setShowTimerPicker(false);
+                              }}
+                              className="block w-full px-6 py-3 text-sm font-medium text-left transition-colors hover:bg-[#2A3048]"
+                              style={{
+                                color:
+                                  timerDuration === t ? "#00CFFF" : "#FFFFFF",
+                              }}
+                            >
+                              {t}s
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
               </div>
+
+              {/* Hold hint */}
+              <AnimatePresence>
+                {!isRecording && isActive && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ delay: 1 }}
+                    className="absolute bottom-36 left-0 right-0 flex justify-center pointer-events-none"
+                  >
+                    <div
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-full"
+                      style={{ background: "rgba(0,0,0,0.5)" }}
+                    >
+                      <Video size={13} color="#B0B0CC" />
+                      <span className="text-[#B0B0CC] text-xs">
+                        Hold for video · Tap for photo
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Bottom controls */}
               <div
@@ -636,33 +863,50 @@ export function CameraTab() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   className="hidden"
                   onChange={handleGalleryUpload}
                 />
 
-                {/* Capture button */}
-                <motion.button
+                {/* Capture button — tap for photo, hold for video */}
+                <button
                   type="button"
-                  whileTap={{ scale: 0.93 }}
-                  onClick={handleCapture}
+                  onPointerDown={handleButtonPointerDown}
+                  onPointerUp={handleButtonPointerUp}
+                  onPointerLeave={handleButtonPointerLeave}
                   disabled={!isActive}
-                  className="w-20 h-20 rounded-full flex items-center justify-center"
+                  className="w-20 h-20 rounded-full flex items-center justify-center select-none"
                   style={{
                     background: "transparent",
-                    border: "3px solid rgba(255,255,255,0.9)",
-                    boxShadow:
-                      "0 0 25px rgba(0, 207, 255, 0.4), 0 0 60px rgba(0, 207, 255, 0.15)",
+                    border: `3px solid ${
+                      isRecording
+                        ? "rgba(255,59,59,0.9)"
+                        : "rgba(255,255,255,0.9)"
+                    }`,
+                    boxShadow: isRecording
+                      ? "0 0 25px rgba(255,59,59,0.5), 0 0 60px rgba(255,59,59,0.2)"
+                      : "0 0 25px rgba(0, 207, 255, 0.4), 0 0 60px rgba(0, 207, 255, 0.15)",
+                    animation: isRecording
+                      ? "recording-ring 1s ease-in-out infinite"
+                      : undefined,
+                    touchAction: "none",
                   }}
                   data-ocid="camera.primary_button"
                 >
-                  <div
-                    className="w-14 h-14 rounded-full"
+                  <motion.div
+                    animate={{
+                      scale: isRecording ? 0.55 : 1,
+                      borderRadius: isRecording ? "6px" : "50%",
+                    }}
+                    transition={{ duration: 0.2 }}
+                    className="w-14 h-14"
                     style={{
-                      background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                      background: isRecording
+                        ? "#FF3B3B"
+                        : "linear-gradient(135deg, #00CFFF, #BD00FF)",
                     }}
                   />
-                </motion.button>
+                </button>
 
                 {/* Flip */}
                 <PressableButton
@@ -689,13 +933,23 @@ export function CameraTab() {
             className="flex-1 flex flex-col"
           >
             <div className="relative flex-1 overflow-hidden">
-              {capturedImage && (
+              {/* Video preview */}
+              {isVideoSnap && capturedVideo ? (
+                <video
+                  src={capturedVideo}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+              ) : capturedImage ? (
                 <img
                   src={capturedImage}
                   alt="Snap preview"
                   className="w-full h-full object-cover"
                 />
-              )}
+              ) : null}
 
               <div
                 className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 pt-14 pb-4"
@@ -716,13 +970,53 @@ export function CameraTab() {
                   <X size={20} color="white" />
                 </PressableButton>
 
-                {isEphemeral && (
+                {/* Video badge */}
+                {isVideoSnap && (
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+                    style={{
+                      background: "rgba(0,0,0,0.5)",
+                      backdropFilter: "blur(8px)",
+                    }}
+                  >
+                    <Video size={14} color="#FF3B3B" />
+                    <span className="text-white text-xs font-semibold">
+                      Video
+                    </span>
+                  </div>
+                )}
+
+                {!isVideoSnap && isEphemeral && (
                   <SnapTimer
                     duration={timerDuration}
                     onExpire={handleNoExpiry}
                   />
                 )}
               </div>
+
+              {/* Caption overlay display */}
+              <AnimatePresence>
+                {snapCaption && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute bottom-4 left-4 right-4 flex items-center gap-2"
+                  >
+                    <div
+                      className="flex-1 text-center px-4 py-2 rounded-xl"
+                      style={{
+                        background: "rgba(0,0,0,0.7)",
+                        borderRadius: 12,
+                      }}
+                    >
+                      <p className="text-white font-semibold text-sm">
+                        {snapCaption}
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Preview bottom panel */}
@@ -734,40 +1028,91 @@ export function CameraTab() {
                 delay: 0.1,
                 duration: 0.35,
               }}
-              className="px-5 pt-5 pb-8"
+              className="px-5 pt-4 pb-8"
               style={{ background: "#1A1A2E", borderTop: "1px solid #2A3048" }}
             >
-              {/* Ephemeral toggle */}
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <p className="text-white font-semibold text-sm">
-                    Ephemeral snap
-                  </p>
-                  <p className="text-[#B0B0CC] text-xs mt-0.5">
-                    Disappears after {timerDuration}s
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsEphemeral((e) => !e)}
-                  className="w-12 h-6 rounded-full transition-all duration-300 relative"
+              {/* Caption input */}
+              <div className="mb-4">
+                <div
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl"
                   style={{
-                    background: isEphemeral
-                      ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
-                      : "#2A3048",
+                    background: "rgba(255,255,255,0.06)",
+                    border: "1px solid rgba(255,255,255,0.1)",
                   }}
-                  aria-label={`Ephemeral mode ${isEphemeral ? "on" : "off"}`}
-                  data-ocid="camera.switch"
                 >
-                  <div
-                    className="absolute w-5 h-5 rounded-full top-0.5 transition-all duration-300"
-                    style={{
-                      left: isEphemeral ? "calc(100% - 22px)" : "2px",
-                      background: "white",
-                    }}
+                  <input
+                    type="text"
+                    placeholder="Add a caption..."
+                    value={snapCaption}
+                    onChange={(e) => setSnapCaption(e.target.value)}
+                    className="flex-1 bg-transparent text-white text-sm outline-none placeholder-[#B0B0CC]"
+                    maxLength={150}
+                    data-ocid="camera.input"
                   />
-                </button>
+                  {snapCaption && (
+                    <button
+                      type="button"
+                      onClick={() => setSnapCaption("")}
+                      className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
+                      style={{ background: "rgba(255,255,255,0.15)" }}
+                      aria-label="Clear caption"
+                    >
+                      <X size={11} color="white" />
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* AI Assistant button */}
+              <PressableButton
+                onClick={() => setShowAiAssistant(true)}
+                className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-4"
+                style={{
+                  border: "1px solid rgba(0,207,255,0.4)",
+                  background: "rgba(0,207,255,0.08)",
+                  color: "#00CFFF",
+                }}
+                data-ocid="camera.open_modal_button"
+              >
+                <Sparkles size={16} />
+                AI Assistant
+              </PressableButton>
+
+              {/* Ephemeral toggle (photo only) */}
+              {!isVideoSnap && (
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <p className="text-white font-semibold text-sm">
+                      Ephemeral snap
+                    </p>
+                    <p className="text-[#B0B0CC] text-xs mt-0.5">
+                      Disappears after {timerDuration}s
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsEphemeral((e) => !e)}
+                    className="w-12 h-6 rounded-full transition-all duration-300 relative"
+                    style={{
+                      background: isEphemeral
+                        ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
+                        : "#2A3048",
+                    }}
+                    aria-label={`Ephemeral mode ${isEphemeral ? "on" : "off"}`}
+                    data-ocid="camera.switch"
+                  >
+                    <div
+                      className="absolute w-5 h-5 rounded-full top-0.5 transition-all duration-300"
+                      style={{
+                        left: isEphemeral ? "calc(100% - 22px)" : "2px",
+                        background: "white",
+                      }}
+                    />
+                  </button>
+                </div>
+              )}
+
+              {isVideoSnap && <div className="mb-5" />}
 
               {/* Send To button */}
               <PressableButton
@@ -777,7 +1122,7 @@ export function CameraTab() {
                   background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
                   boxShadow: "0 0 25px rgba(0,207,255,0.3)",
                 }}
-                data-ocid="camera.open_modal_button"
+                data-ocid="camera.secondary_button"
               >
                 <Send size={18} />
                 {selectedFriends.length > 0
@@ -800,6 +1145,20 @@ export function CameraTab() {
             onClose={() => setShowSendSheet(false)}
             sending={sending}
             sent={sent}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* AI Snap Assistant sheet */}
+      <AnimatePresence>
+        {showAiAssistant && (
+          <AiSnapAssistant
+            friends={friends}
+            onSelectCaption={(caption) => {
+              setSnapCaption(caption);
+              setShowAiAssistant(false);
+            }}
+            onClose={() => setShowAiAssistant(false)}
           />
         )}
       </AnimatePresence>

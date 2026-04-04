@@ -32,6 +32,7 @@ export interface Message {
   isEphemeral: boolean;
   snapViewed: boolean;
   savedToChat?: boolean;
+  isVideo?: boolean;
 }
 
 export interface ConversationSummary {

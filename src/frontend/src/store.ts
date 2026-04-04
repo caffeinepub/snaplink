@@ -173,6 +173,83 @@ export function searchUsers(query: string, currentUserId: string): User[] {
   );
 }
 
+export type UserConnectionStatus =
+  | "none"
+  | "pending_sent"
+  | "pending_received"
+  | "friends";
+
+export type UserWithStatus = User & {
+  connectionStatus: UserConnectionStatus;
+  requestId?: string;
+};
+
+export function searchUsersWithStatus(
+  query: string,
+  currentUser: User,
+): UserWithStatus[] {
+  const users = getUsers();
+  const requests = getRequests();
+
+  const filtered = users.filter((u) => {
+    if (u.id === currentUser.id) return false;
+    if (!query.trim()) return true;
+    return (
+      u.username.toLowerCase().includes(query.toLowerCase()) ||
+      u.displayName.toLowerCase().includes(query.toLowerCase())
+    );
+  });
+
+  return filtered.map((u) => {
+    // Check if friends
+    const friendReq = requests.find(
+      (r) =>
+        ((r.fromUser === currentUser.username && r.toUser === u.username) ||
+          (r.fromUser === u.username && r.toUser === currentUser.username)) &&
+        r.status === "accepted",
+    );
+    if (friendReq) {
+      return {
+        ...u,
+        connectionStatus: "friends" as const,
+        requestId: friendReq.id,
+      };
+    }
+
+    // Check pending sent
+    const sentReq = requests.find(
+      (r) =>
+        r.fromUser === currentUser.username &&
+        r.toUser === u.username &&
+        r.status === "pending",
+    );
+    if (sentReq) {
+      return {
+        ...u,
+        connectionStatus: "pending_sent" as const,
+        requestId: sentReq.id,
+      };
+    }
+
+    // Check pending received
+    const receivedReq = requests.find(
+      (r) =>
+        r.fromUser === u.username &&
+        r.toUser === currentUser.username &&
+        r.status === "pending",
+    );
+    if (receivedReq) {
+      return {
+        ...u,
+        connectionStatus: "pending_received" as const,
+        requestId: receivedReq.id,
+      };
+    }
+
+    return { ...u, connectionStatus: "none" as const };
+  });
+}
+
 export function sendConnectionRequest(
   fromUser: User,
   toUsername: string,
@@ -265,13 +342,25 @@ export function sendSnap(
   snapDataUrl: string,
   isEphemeral: boolean,
   savedToChat: boolean,
+  caption?: string,
+  isVideo?: boolean,
 ): Message {
   const messages = getMessages();
+  let content: string;
+  if (caption?.trim()) {
+    content = caption.trim();
+  } else if (isVideo) {
+    content = "🎥 Sent a video snap";
+  } else if (isEphemeral) {
+    content = "📸 Sent a snap";
+  } else {
+    content = "📷 Sent a photo";
+  }
   const msg: Message = {
     id: crypto.randomUUID(),
     senderId: from.username,
     receiverId: toUsername,
-    content: isEphemeral ? "📸 Sent a snap" : "📷 Sent a photo",
+    content,
     timestamp: Date.now(),
     isRead: false,
     isSnap: true,
@@ -279,6 +368,7 @@ export function sendSnap(
     isEphemeral,
     snapViewed: false,
     savedToChat,
+    isVideo: isVideo ?? false,
   };
   messages.push(msg);
   saveMessages(messages);

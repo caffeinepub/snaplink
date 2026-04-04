@@ -27,7 +27,6 @@ export function useActor() {
 
       const actor = await createActorWithConfig(actorOptions);
       const adminToken = getSecretParameter("caffeineAdminToken") || "";
-      // @ts-ignore
       await actor._initializeAccessControlWithSecret(adminToken);
       return actor;
     },
