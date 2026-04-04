@@ -13,6 +13,7 @@ import { useApp } from "../context/AppContext";
 import {
   getConversationMessages,
   getConversations,
+  getUsers,
   markMessagesRead,
   sendMessage,
 } from "../store";
@@ -53,6 +54,9 @@ function ConversationList({
     return () => clearInterval(interval);
   }, [refresh]);
 
+  // Get all users for avatar lookups
+  const allUsers = getUsers();
+
   return (
     <div className="flex flex-col h-full" style={{ background: "#1A1A2E" }}>
       <div className="px-5 pt-12 pb-4">
@@ -79,47 +83,56 @@ function ConversationList({
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto scrollbar-hide">
-          {conversations.map((conv, i) => (
-            <motion.div
-              key={conv.username}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.05, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => onSelect(conv.username)}
-              className="flex items-center gap-3 px-5 py-3.5 cursor-pointer active:bg-[#1A1F33] transition-colors"
-              style={{ borderBottom: "1px solid rgba(42,48,72,0.5)" }}
-              data-ocid={`chats.item.${i + 1}`}
-            >
-              <UserAvatar name={conv.displayName} size={50} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <span className="text-white font-semibold text-[15px]">
-                    {conv.displayName}
-                  </span>
-                  <span className="text-[#B0B0CC] text-xs">
-                    {formatTime(conv.lastMessageTimestamp)}
-                  </span>
+          {conversations.map((conv, i) => {
+            const friendUser = allUsers.find(
+              (u) => u.username === conv.username,
+            );
+            return (
+              <motion.div
+                key={conv.username}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.05, ease: [0.16, 1, 0.3, 1] }}
+                onClick={() => onSelect(conv.username)}
+                className="flex items-center gap-3 px-5 py-3.5 cursor-pointer active:bg-[#1A1F33] transition-colors"
+                style={{ borderBottom: "1px solid rgba(42,48,72,0.5)" }}
+                data-ocid={`chats.item.${i + 1}`}
+              >
+                <UserAvatar
+                  name={conv.displayName}
+                  size={50}
+                  avatarUrl={friendUser?.avatarUrl}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-white font-semibold text-[15px]">
+                      {conv.displayName}
+                    </span>
+                    <span className="text-[#B0B0CC] text-xs">
+                      {formatTime(conv.lastMessageTimestamp)}
+                    </span>
+                  </div>
+                  <p
+                    className="text-[#B0B0CC] text-sm truncate mt-0.5"
+                    style={{ maxWidth: "200px" }}
+                  >
+                    {conv.lastMessageContent}
+                  </p>
                 </div>
-                <p
-                  className="text-[#B0B0CC] text-sm truncate mt-0.5"
-                  style={{ maxWidth: "200px" }}
-                >
-                  {conv.lastMessageContent}
-                </p>
-              </div>
-              {conv.unreadCount > 0 && (
-                <div
-                  className="rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold text-white"
-                  style={{
-                    background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
-                    minWidth: 20,
-                  }}
-                >
-                  {conv.unreadCount > 9 ? "9+" : conv.unreadCount}
-                </div>
-              )}
-            </motion.div>
-          ))}
+                {conv.unreadCount > 0 && (
+                  <div
+                    className="rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold text-white"
+                    style={{
+                      background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                      minWidth: 20,
+                    }}
+                  >
+                    {conv.unreadCount > 9 ? "9+" : conv.unreadCount}
+                  </div>
+                )}
+              </motion.div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -142,6 +155,10 @@ function ChatView({
   const [inputText, setInputText] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Look up friend's avatar
+  const allUsers = getUsers();
+  const friendUser = allUsers.find((u) => u.username === username);
 
   const refresh = useCallback(() => {
     if (currentUser) {
@@ -187,7 +204,11 @@ function ChatView({
         >
           <ArrowLeft size={22} color="#00CFFF" />
         </button>
-        <UserAvatar name={displayName} size={38} />
+        <UserAvatar
+          name={displayName}
+          size={38}
+          avatarUrl={friendUser?.avatarUrl}
+        />
         <div className="flex-1">
           <p className="text-white font-semibold text-[15px]">{displayName}</p>
           <p className="text-[#B0B0CC] text-xs">@{username}</p>
@@ -274,7 +295,9 @@ function ChatView({
                   </div>
                 )}
                 <div
-                  className={`flex items-center gap-1 mt-1 ${isSent ? "justify-end" : "justify-start"}`}
+                  className={`flex items-center gap-1 mt-1 ${
+                    isSent ? "justify-end" : "justify-start"
+                  }`}
                 >
                   <span className="text-[10px]" style={{ color: "#B0B0CC" }}>
                     {formatTime(msg.timestamp)}

@@ -41,7 +41,11 @@ function RequestCard({
       exit={{ opacity: 0, scale: 0.9, y: -10 }}
       className="card-surface p-4 flex items-center gap-4"
     >
-      <UserAvatar name={request.fromDisplayName} size={52} />
+      <UserAvatar
+        name={request.fromDisplayName}
+        size={52}
+        avatarUrl={request.fromAvatarUrl}
+      />
       <div className="flex-1 min-w-0">
         <p className="text-white font-semibold text-[15px] truncate">
           {request.fromDisplayName}
@@ -138,7 +142,11 @@ function FindPeopleSection() {
             className="card-surface p-3.5 mt-3 flex items-center gap-3"
             data-ocid={`requests.item.${i + 1}`}
           >
-            <UserAvatar name={user.displayName} size={44} />
+            <UserAvatar
+              name={user.displayName}
+              size={44}
+              avatarUrl={user.avatarUrl}
+            />
             <div className="flex-1 min-w-0">
               <p className="text-white font-semibold text-sm truncate">
                 {user.displayName}

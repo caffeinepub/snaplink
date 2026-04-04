@@ -4,6 +4,7 @@ export interface User {
   username: string;
   displayName: string;
   bio: string;
+  avatarUrl?: string;
   createdAt: number;
   passwordHash: string;
   useII: boolean;
@@ -13,6 +14,7 @@ export interface ConnectionRequest {
   id: string;
   fromUser: string;
   fromDisplayName: string;
+  fromAvatarUrl?: string;
   toUser: string;
   status: "pending" | "accepted" | "declined";
   createdAt: number;

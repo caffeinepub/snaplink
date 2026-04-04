@@ -99,6 +99,7 @@ export function registerUser(
     username: username.toLowerCase(),
     displayName,
     bio: "",
+    avatarUrl: undefined,
     createdAt: Date.now(),
     passwordHash: simpleHash(password),
     useII: false,
@@ -132,6 +133,7 @@ export function loginOrRegisterII(principal: string): User {
       username,
       displayName: `User ${principal.slice(0, 6)}`,
       bio: "",
+      avatarUrl: undefined,
       createdAt: Date.now(),
       passwordHash: "",
       useII: true,
@@ -146,12 +148,16 @@ export function updateUserProfile(
   userId: string,
   displayName: string,
   bio: string,
+  avatarUrl?: string,
 ): void {
   const users = getUsers();
   const idx = users.findIndex((u) => u.id === userId);
   if (idx !== -1) {
     users[idx].displayName = displayName;
     users[idx].bio = bio;
+    if (avatarUrl !== undefined) {
+      users[idx].avatarUrl = avatarUrl;
+    }
     saveUsers(users);
   }
 }
@@ -193,6 +199,7 @@ export function sendConnectionRequest(
     id: crypto.randomUUID(),
     fromUser: fromUser.username,
     fromDisplayName: fromUser.displayName,
+    fromAvatarUrl: fromUser.avatarUrl,
     toUser: toUsername,
     status: "pending",
     createdAt: Date.now(),
@@ -375,6 +382,7 @@ export function seedDemoData(): void {
       username: "alex_nova",
       displayName: "Alex Nova",
       bio: "Photographer | Explorer | Living life one snap at a time",
+      avatarUrl: undefined,
       createdAt: Date.now() - 30 * 24 * 60 * 60 * 1000,
       passwordHash: simpleHash("demo123"),
       useII: false,
@@ -384,6 +392,7 @@ export function seedDemoData(): void {
       username: "sara_moon",
       displayName: "Sara Moon",
       bio: "Design lover & coffee enthusiast ☕",
+      avatarUrl: undefined,
       createdAt: Date.now() - 20 * 24 * 60 * 60 * 1000,
       passwordHash: simpleHash("demo123"),
       useII: false,
@@ -393,6 +402,7 @@ export function seedDemoData(): void {
       username: "kai_zen",
       displayName: "Kai Zen",
       bio: "Building cool things on the internet",
+      avatarUrl: undefined,
       createdAt: Date.now() - 15 * 24 * 60 * 60 * 1000,
       passwordHash: simpleHash("demo123"),
       useII: false,
@@ -402,6 +412,7 @@ export function seedDemoData(): void {
       username: "priya_v",
       displayName: "Priya Verma",
       bio: "Artist & traveler 🌍",
+      avatarUrl: undefined,
       createdAt: Date.now() - 10 * 24 * 60 * 60 * 1000,
       passwordHash: simpleHash("demo123"),
       useII: false,

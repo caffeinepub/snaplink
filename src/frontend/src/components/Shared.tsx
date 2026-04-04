@@ -4,9 +4,17 @@ interface AvatarProps {
   name: string;
   size?: number;
   className?: string;
+  avatarUrl?: string;
+  style?: React.CSSProperties;
 }
 
-export function UserAvatar({ name, size = 44, className = "" }: AvatarProps) {
+export function UserAvatar({
+  name,
+  size = 44,
+  className = "",
+  avatarUrl,
+  style,
+}: AvatarProps) {
   const initials = name
     .split(" ")
     .map((n) => n[0])
@@ -25,16 +33,26 @@ export function UserAvatar({ name, size = 44, className = "" }: AvatarProps) {
 
   return (
     <div
-      className={`flex items-center justify-center rounded-full flex-shrink-0 font-bold text-white ${className}`}
+      className={`flex items-center justify-center rounded-full flex-shrink-0 font-bold text-white overflow-hidden ${className}`}
       style={{
         width: size,
         height: size,
-        background: colors[colorIndex],
+        background: avatarUrl ? "transparent" : colors[colorIndex],
         fontSize: Math.max(size * 0.35, 10),
         boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+        ...style,
       }}
     >
-      {initials}
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt={name}
+          className="rounded-full object-cover w-full h-full"
+          style={{ width: size, height: size }}
+        />
+      ) : (
+        initials
+      )}
     </div>
   );
 }

@@ -98,74 +98,222 @@ function SnapTimer({
   );
 }
 
-function FriendPicker({
+// Bottom sheet friend selector
+function SendToSheet({
   friends,
   selectedFriends,
   onToggle,
+  onSend,
+  onClose,
+  sending,
+  sent,
 }: {
   friends: User[];
   selectedFriends: string[];
   onToggle: (username: string) => void;
+  onSend: () => void;
+  onClose: () => void;
+  sending: boolean;
+  sent: boolean;
 }) {
   return (
-    <div className="flex flex-wrap gap-3 mt-4">
-      {friends.map((friend) => {
-        const selected = selectedFriends.includes(friend.username);
-        return (
-          <motion.button
+    // Backdrop
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end"
+      style={{ background: "rgba(0,0,0,0.6)" }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      {/* Sheet */}
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.38 }}
+        className="w-full"
+        style={{
+          background: "#1A1F33",
+          borderRadius: "24px 24px 0 0",
+          border: "1px solid #2A3048",
+          borderBottom: "none",
+          maxHeight: "75vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
+        onClick={(e) => e.stopPropagation()}
+        data-ocid="camera.sheet"
+      >
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1">
+          <div
+            className="w-10 h-1 rounded-full"
+            style={{ background: "rgba(255,255,255,0.2)" }}
+          />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3">
+          <h2 className="text-white font-bold text-lg">Send To</h2>
+          <button
             type="button"
-            key={friend.username}
-            whileTap={{ scale: 0.92 }}
-            onClick={() => onToggle(friend.username)}
-            className="flex flex-col items-center gap-1"
-            data-ocid="camera.toggle"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full flex items-center justify-center transition-colors"
+            style={{ background: "rgba(255,255,255,0.08)" }}
+            data-ocid="camera.close_button"
           >
-            <div className="relative">
-              <UserAvatar name={friend.displayName} size={52} />
-              {selected && (
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center"
-                  style={{
-                    background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
-                  }}
-                >
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 10 10"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M2 5l2.5 2.5L8 2.5"
-                      stroke="white"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      fill="none"
-                    />
-                  </svg>
-                </motion.div>
-              )}
+            <X size={18} color="#B0B0CC" />
+          </button>
+        </div>
+
+        {/* Friend list */}
+        <div
+          className="flex-1 overflow-y-auto px-4 pb-2"
+          style={{ minHeight: 0 }}
+        >
+          {friends.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-3">
+              <p className="text-[#B0B0CC] text-sm text-center">
+                No friends yet. Connect with people first!
+              </p>
             </div>
-            <span
-              className="text-xs"
-              style={{
-                color: selected ? "#00CFFF" : "#B0B0CC",
-                maxWidth: 60,
-                textAlign: "center",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {friend.displayName.split(" ")[0]}
-            </span>
-          </motion.button>
-        );
-      })}
-    </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {friends.map((friend, i) => {
+                const selected = selectedFriends.includes(friend.username);
+                return (
+                  <motion.button
+                    type="button"
+                    key={friend.username}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => onToggle(friend.username)}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl transition-colors text-left"
+                    style={{
+                      background: selected
+                        ? "rgba(0,207,255,0.08)"
+                        : "transparent",
+                      border: selected
+                        ? "1px solid rgba(0,207,255,0.25)"
+                        : "1px solid transparent",
+                    }}
+                    data-ocid={`camera.toggle.${i + 1}`}
+                  >
+                    <UserAvatar
+                      name={friend.displayName}
+                      size={48}
+                      avatarUrl={friend.avatarUrl}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-semibold text-sm truncate">
+                        {friend.displayName}
+                      </p>
+                      <p className="text-[#B0B0CC] text-xs">
+                        @{friend.username}
+                      </p>
+                    </div>
+                    {/* Checkbox indicator */}
+                    <div
+                      className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center transition-all"
+                      style={{
+                        background: selected
+                          ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
+                          : "rgba(255,255,255,0.08)",
+                        border: selected
+                          ? "none"
+                          : "1.5px solid rgba(255,255,255,0.2)",
+                      }}
+                    >
+                      {selected && (
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 12 12"
+                          fill="none"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M2.5 6l2.5 2.5L9.5 3"
+                            stroke="white"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      )}
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Send button */}
+        <div className="px-4 py-4" style={{ borderTop: "1px solid #2A3048" }}>
+          <AnimatePresence mode="wait">
+            {sent ? (
+              <motion.div
+                key="sent"
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="w-full py-4 rounded-2xl flex items-center justify-center gap-2"
+                style={{
+                  background: "linear-gradient(135deg, #00CFFF, #00AA88)",
+                }}
+              >
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4 10l4.5 4.5L16 6"
+                    stroke="white"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span className="text-white font-bold">Sent!</span>
+              </motion.div>
+            ) : (
+              <PressableButton
+                key="send"
+                onClick={onSend}
+                disabled={selectedFriends.length === 0 || sending}
+                className="w-full py-4 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2"
+                style={{
+                  background:
+                    selectedFriends.length > 0
+                      ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
+                      : "#2A3048",
+                  boxShadow:
+                    selectedFriends.length > 0
+                      ? "0 0 25px rgba(0,207,255,0.3)"
+                      : "none",
+                  opacity: selectedFriends.length === 0 ? 0.5 : 1,
+                }}
+                data-ocid="camera.submit_button"
+              >
+                <Send size={18} />
+                {sending
+                  ? "Sending..."
+                  : selectedFriends.length === 0
+                    ? "Select friends to send"
+                    : `Send to ${selectedFriends.length} friend${
+                        selectedFriends.length > 1 ? "s" : ""
+                      }`}
+              </PressableButton>
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -181,6 +329,7 @@ export function CameraTab() {
   const [friends, setFriends] = useState<User[]>([]);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [showSendSheet, setShowSendSheet] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const {
@@ -252,6 +401,8 @@ export function CameraTab() {
       setSent(true);
       setTimeout(() => {
         setSent(false);
+        setSending(false);
+        setShowSendSheet(false);
         setCapturedImage(null);
         setCameraState("viewfinder");
         setSelectedFriends([]);
@@ -262,8 +413,8 @@ export function CameraTab() {
         } else {
           setActiveTab("chats");
         }
-      }, 1000);
-    } finally {
+      }, 1200);
+    } catch {
       setSending(false);
     }
   };
@@ -272,6 +423,7 @@ export function CameraTab() {
     setCapturedImage(null);
     setCameraState("viewfinder");
     setSelectedFriends([]);
+    setShowSendSheet(false);
     startCamera();
   };
 
@@ -573,6 +725,7 @@ export function CameraTab() {
               </div>
             </div>
 
+            {/* Preview bottom panel */}
             <motion.div
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
@@ -585,7 +738,7 @@ export function CameraTab() {
               style={{ background: "#1A1A2E", borderTop: "1px solid #2A3048" }}
             >
               {/* Ephemeral toggle */}
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-5">
                 <div>
                   <p className="text-white font-semibold text-sm">
                     Ephemeral snap
@@ -616,78 +769,41 @@ export function CameraTab() {
                 </button>
               </div>
 
-              <p className="text-white font-semibold text-sm mb-1">Send to</p>
-              {friends.length === 0 ? (
-                <p className="text-[#B0B0CC] text-sm mt-2">
-                  No friends yet. Connect with people first!
-                </p>
-              ) : (
-                <FriendPicker
-                  friends={friends}
-                  selectedFriends={selectedFriends}
-                  onToggle={handleToggleFriend}
-                />
-              )}
-
-              <AnimatePresence mode="wait">
-                {sent ? (
-                  <motion.div
-                    key="sent"
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="mt-5 w-full py-4 rounded-2xl flex items-center justify-center gap-2"
-                    style={{
-                      background: "linear-gradient(135deg, #00CFFF, #00AA88)",
-                    }}
-                  >
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 20 20"
-                      fill="none"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M4 10l4.5 4.5L16 6"
-                        stroke="white"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                    <span className="text-white font-bold">Sent!</span>
-                  </motion.div>
-                ) : (
-                  <PressableButton
-                    key="send"
-                    onClick={handleSendSnap}
-                    disabled={selectedFriends.length === 0 || sending}
-                    className="mt-5 w-full py-4 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2"
-                    style={{
-                      background:
-                        selectedFriends.length > 0
-                          ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
-                          : "#2A3048",
-                      boxShadow:
-                        selectedFriends.length > 0
-                          ? "0 0 25px rgba(0,207,255,0.3)"
-                          : "none",
-                    }}
-                    data-ocid="camera.submit_button"
-                  >
-                    <Send size={18} />
-                    {sending
-                      ? "Sending..."
-                      : selectedFriends.length === 0
-                        ? "Select friends to send"
-                        : `Send to ${selectedFriends.length} friend${selectedFriends.length > 1 ? "s" : ""}`}
-                  </PressableButton>
-                )}
-              </AnimatePresence>
+              {/* Send To button */}
+              <PressableButton
+                onClick={() => setShowSendSheet(true)}
+                className="w-full py-4 rounded-2xl font-bold text-base text-white flex items-center justify-center gap-2"
+                style={{
+                  background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                  boxShadow: "0 0 25px rgba(0,207,255,0.3)",
+                }}
+                data-ocid="camera.open_modal_button"
+              >
+                <Send size={18} />
+                {selectedFriends.length > 0
+                  ? `Send To... (${selectedFriends.length} selected)`
+                  : "Send To..."}
+              </PressableButton>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Send To bottom sheet */}
+      <AnimatePresence>
+        {showSendSheet && (
+          <SendToSheet
+            friends={friends}
+            selectedFriends={selectedFriends}
+            onToggle={handleToggleFriend}
+            onSend={handleSendSnap}
+            onClose={() => setShowSendSheet(false)}
+            sending={sending}
+            sent={sent}
+          />
+        )}
+      </AnimatePresence>
+
       <canvas ref={canvasRef} className="hidden" />
     </div>
   );

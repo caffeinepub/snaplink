@@ -1,6 +1,14 @@
-import { Check, Edit3, LogOut, MessageCircle, Users, X } from "lucide-react";
+import {
+  Camera,
+  Check,
+  Edit3,
+  LogOut,
+  MessageCircle,
+  Users,
+  X,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import {
   getFriends,
@@ -18,11 +26,14 @@ export function ProfileTab() {
   const [bio, setBio] = useState("");
   const [friends, setFriends] = useState<User[]>([]);
   const [saving, setSaving] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (currentUser) {
       setDisplayName(currentUser.displayName);
       setBio(currentUser.bio);
+      setAvatarUrl(currentUser.avatarUrl);
       setFriends(getFriends(currentUser.username));
     }
   }, [currentUser]);
@@ -30,7 +41,7 @@ export function ProfileTab() {
   const handleSave = () => {
     if (!currentUser) return;
     setSaving(true);
-    updateUserProfile(currentUser.id, displayName, bio);
+    updateUserProfile(currentUser.id, displayName, bio, avatarUrl);
     const users = getUsers();
     const updated = users.find((u) => u.id === currentUser.id);
     if (updated) {
@@ -43,6 +54,30 @@ export function ProfileTab() {
 
   const handleLogout = () => {
     logout();
+  };
+
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      setAvatarUrl(dataUrl);
+      // immediately persist so it shows everywhere
+      updateUserProfile(
+        currentUser.id,
+        currentUser.displayName,
+        currentUser.bio,
+        dataUrl,
+      );
+      const users = getUsers();
+      const updated = users.find((u) => u.id === currentUser.id);
+      if (updated) {
+        persistUser(updated);
+        refreshUser();
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   if (!currentUser) return null;
@@ -94,9 +129,60 @@ export function ProfileTab() {
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          className="mb-4"
+          className="mb-4 relative"
         >
-          <UserAvatar name={currentUser.displayName} size={90} />
+          {/* Hidden file input */}
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleAvatarFileChange}
+            data-ocid="profile.upload_button"
+          />
+          {/* Tappable avatar */}
+          <button
+            type="button"
+            onClick={() => avatarInputRef.current?.click()}
+            className="relative block rounded-full focus:outline-none"
+            aria-label="Change profile picture"
+            style={{
+              padding: 0,
+              background: "transparent",
+              border: "none",
+            }}
+          >
+            {/* Gradient ring */}
+            <div
+              className="rounded-full p-0.5"
+              style={{
+                background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                boxShadow: "0 0 20px rgba(0,207,255,0.3)",
+              }}
+            >
+              <div
+                className="rounded-full overflow-hidden"
+                style={{ width: 90, height: 90, background: "#1A1F33" }}
+              >
+                <UserAvatar
+                  name={currentUser.displayName}
+                  size={90}
+                  avatarUrl={avatarUrl}
+                />
+              </div>
+            </div>
+            {/* Camera overlay badge */}
+            <div
+              className="absolute bottom-0.5 right-0.5 w-8 h-8 rounded-full flex items-center justify-center"
+              style={{
+                background: "#1A1F33",
+                border: "2px solid #1A1A2E",
+                boxShadow: "0 0 8px rgba(0,207,255,0.4)",
+              }}
+            >
+              <Camera size={14} color="#00CFFF" />
+            </div>
+          </button>
         </motion.div>
 
         <AnimatePresence mode="wait">
@@ -136,15 +222,23 @@ export function ProfileTab() {
                   rows={3}
                   placeholder="Tell people about yourself..."
                   value={bio}
+                  maxLength={150}
                   onChange={(e) => setBio(e.target.value)}
                   data-ocid="profile.textarea"
                 />
+                <p
+                  className="text-xs mt-1 ml-1 text-right"
+                  style={{ color: bio.length >= 130 ? "#FF6B6B" : "#B0B0CC" }}
+                >
+                  {bio.length}/150
+                </p>
               </div>
               <PressableButton
                 onClick={() => {
                   setEditing(false);
                   setDisplayName(currentUser.displayName);
                   setBio(currentUser.bio);
+                  setAvatarUrl(currentUser.avatarUrl);
                 }}
                 className="flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-sm"
                 style={{
@@ -271,7 +365,11 @@ export function ProfileTab() {
                 className="card-surface p-3.5 flex items-center gap-3"
                 data-ocid={`profile.item.${i + 1}`}
               >
-                <UserAvatar name={friend.displayName} size={40} />
+                <UserAvatar
+                  name={friend.displayName}
+                  size={40}
+                  avatarUrl={friend.avatarUrl}
+                />
                 <div className="flex-1">
                   <p className="text-white font-semibold text-sm">
                     {friend.displayName}
