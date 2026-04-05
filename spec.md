@@ -1,66 +1,39 @@
-# SnapLink
+# SnapLink — Snap Sending Speed Optimization
 
 ## Current State
 
-SnapLink is a fully functional social snap/chat app on ICP. Version 40 is live with these features:
-- Dual auth (Internet Identity + Username/Password)
-- Full messaging and snap sharing (photos, videos) via backend canister
-- Friend system (mutual request model)
-- Camera tab: photo capture, video capture, gallery upload
-- Filters/Overlays (warm, cool, B&W, vivid, timestamp) -- added v40
-- Snap Stories (post + view friend stories) -- added v40
-- Reactions (emoji reactions on messages, long-press) -- added v40
-- Group Chats (create group from friends, send messages) -- added v40
-- Snap Streaks + Snap Score -- added v40
-- Real-time notifications, profile stats auto-refresh
-- AI Snap Assistant on camera preview
+Snap sending (both photo and video) currently takes 5–10 seconds. The bottleneck is in `CameraTab.tsx` `handleSendSnap` and `StorageClient.putFile`.
 
-### Backend methods relevant to new features:
-- `sendMessage(callerUsername, toUsername, content)` -- sends plain text message
-- `getMessages(callerUsername, withUsername, since)` -- fetches messages between two users
-- `Message` type: `{ id, senderId, receiverId, content, timestamp, isRead, isSnap, snapBlobId, isEphemeral, snapViewed }`
-- `getProfile(username)` -- returns UserProfile
-- `updateProfile(callerUsername, displayName, bio)` -- updates profile
-- No existing backend methods for: disappearing messages, ghost mode, screenshot detection, drawing tool, sticker packs, text styles
-
-### Frontend components:
-- `CameraTab.tsx` (1449 lines) -- handles photo/video capture, filter overlay, AI assistant, send sheet
-- `ChatsTab.tsx` (2121 lines) -- handles conversations list, individual chat view, group chat, stories row
-- `ProfileTab.tsx` -- user profile with stats, settings
-- `types.ts` -- shared types including `Message`, `User`, `Tab`
-- `backendStore.ts` -- all backend call wrappers
-- `AppContext.tsx` -- global state (currentUser, activeTab, selectedConversation)
+Key findings:
+- **StorageClient**: Already a module-level singleton in `backendStore.ts` via `getStorageClient()`. No issue here.
+- **Photo compression**: Applied for plain photos (max 1200px, 0.75 quality). For baked images (with filters/drawings/stickers), quality is 0.82. This is acceptable.
+- **Video**: No compression or bitrate constraint at all. Raw blob uploaded at whatever the browser records (2–8 Mbps). This is the biggest bottleneck for video snaps.
+- **Upload pipeline in `StorageClient.putFile`**: Steps 1–3 (hash chunks, getCertificate, uploadBlobTree) are fully sequential and silent — no progress shown during these steps. Only the parallel chunk upload phase shows progress, so the button stays on "Sending..." for several seconds before progress appears.
+- **Multi-recipient sending**: `backendSendSnap` calls run in a serial `for` loop. If sending to 3+ friends, each canister call waits for the previous one.
+- **Progress feedback gap**: During the sequential setup phase of the upload, the button shows nothing meaningful.
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **Drawing & Doodle Tool** -- on the snap preview canvas after photo capture, a toolbar appears with 6 colors + brush size slider; user draws on the canvas; strokes are merged into the JPEG image via Canvas API before sending
-2. **Sticker Packs** -- a sticker panel opens from camera preview showing emoji stickers in categories (Expressions, Animals, Symbols, Food); user taps a sticker to place it on the canvas; it can be dragged to reposition; baked into the image before sending
-3. **Text Styles** -- a text input with a style selector (Bold, Neon, Typewriter, Bubble, Shadow) renders styled text onto the snap preview canvas, baked in before sending
-4. **Screenshot Detection** -- when a snap is open in the chat view (the full-screen snap viewer), a deterrent overlay banner reads "🚫 Screenshots are not allowed"; `user-select: none` and `pointer-events: none` on the snap image; a CSS blur is applied if the user tries to right-click
-5. **Disappearing Messages** -- a timer icon (⏱) is added next to the chat message input; tapping it shows a picker: Off / 1 min / 1 hour / 24 hours; chosen duration is stored; when a message is sent with a timer, the timer value is embedded in the message content as a metadata prefix `[DISAPPEAR:60]`; frontend parses this on load and auto-deletes messages client-side when expired; a small clock icon shows on timed messages; a new backend field `disappearAfter` (optional Nat, seconds) is added to Message type
+- Video compression/bitrate cap: set `videoBitsPerSecond: 1_500_000` (1.5 Mbps) on `MediaRecorder` to reduce video file size by ~50–75% vs browser default
+- Immediate progress feedback: start showing progress ("Preparing...") from the moment the user taps Send, covering the silent pre-upload phase
+- Parallel `backendSendSnap` calls: replace serial for-loop with `Promise.all` when sending to multiple recipients
 
 ### Modify
-- `Message` type: add optional `disappearAfter` field (seconds as Nat, 0 = never) -- backend and frontend types
-- `sendMessage` backend call: accept additional `disappearAfter` parameter
-- `CameraTab.tsx`: add Drawing Tool toolbar, Sticker panel, and Text Styles toolbar to the snap preview stage
-- `ChatsTab.tsx`: add disappearing message timer UI, screenshot deterrent overlay on snap viewer
-- `types.ts`: add `disappearAfter?: number` to `Message` interface
-- `backendStore.ts`: update `backendSendMessage` to pass `disappearAfter`
+- `CameraTab.tsx` `startRecording`: add `videoBitsPerSecond: 1_500_000` and `audioBitsPerSecond: 64_000` to `MediaRecorder` options
+- `CameraTab.tsx` `handleSendSnap`: change serial `for` loop for `backendSendSnap` to `Promise.all`
+- `CameraTab.tsx` upload progress states: show "Preparing snap..." immediately when `sending` becomes true, before upload progress ticks
+- Photo compression: reduce `maxWidth` from 1200 to 900 and quality from 0.75 to 0.7 for faster uploads (still visually fine for mobile screens)
+- Baked image quality: reduce from 0.82 to 0.75 in `bakeImageFull`
 
 ### Remove
-- Nothing is removed
+- Nothing removed — no features, UI, or behavior changes
 
 ## Implementation Plan
 
-1. **Backend**: Add `disappearAfter: ?Nat` to `Message` type; update `sendMessage` to accept it; store and return it in `getMessages`
-2. **Types**: Update `Message` in `types.ts` to include `disappearAfter?: number`
-3. **backendStore.ts**: Update `backendSendMessage` signature to include `disappearAfter: number`
-4. **CameraTab.tsx**: After photo capture, show three new toolbar sections:
-   - Draw tab: color palette (red, orange, yellow, green, blue, white) + brush size slider; canvas draws on top of preview
-   - Stickers tab: emoji grid by category; tap to place, drag to reposition; baked in on send
-   - Text tab: input + 5 style buttons; rendered via Canvas fillText/strokeText with appropriate font/shadow
-   - All three tools share the same HTML5 Canvas overlay on the preview image
-5. **ChatsTab.tsx**:
-   - Screenshot deterrent: when snap viewer is open, add overlay banner + CSS user-select none
-   - Disappearing messages: timer button next to message input; store `selectedDisappearTimer` in local state; when sending, embed timer in message; poll/filter expired messages client-side; show clock icon on timed messages
+1. In `startRecording`, add `videoBitsPerSecond: 1_500_000, audioBitsPerSecond: 64_000` to the `MediaRecorder` constructor options object.
+2. In `handleSendSnap`, replace the serial `for (const friend of recipientFriends)` loop with `await Promise.all(recipientFriends.map(friend => backendSendSnap(...)))`.
+3. Update `compressImage` call: change `maxWidth` to 900 and `quality` to 0.7.
+4. Update baked image `canvas.toBlob` quality from 0.82 to 0.75.
+5. In the `SendToSheet` button label, show `"Preparing snap..."` as soon as `sending` is true and `uploadProgress` is null or 0 (covers the silent pre-upload phase).
+6. Validate, typecheck, and build.

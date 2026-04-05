@@ -750,7 +750,7 @@ async function bakeImageFull(opts: {
       canvas.height = img.height;
       const ctx = canvas.getContext("2d");
       if (!ctx) {
-        canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.82);
+        canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.75);
         return;
       }
 
@@ -878,7 +878,7 @@ async function bakeImageFull(opts: {
       ctx.textAlign = "left";
       ctx.textBaseline = "alphabetic";
 
-      canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.82);
+      canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.75);
     };
     img.src = opts.dataUrl;
   });
@@ -994,8 +994,8 @@ function RecordingTimer({ startTime }: { startTime: number }) {
 
 async function compressImage(
   dataUrl: string,
-  maxWidth = 1200,
-  quality = 0.75,
+  maxWidth = 900,
+  quality = 0.7,
 ): Promise<Blob> {
   return new Promise((resolve) => {
     const img = new window.Image();
@@ -1238,7 +1238,9 @@ function SendToSheet({
                     uploadProgress > 0 &&
                     uploadProgress < 100
                     ? `Uploading... ${uploadProgress}%`
-                    : "Sending..."
+                    : uploadProgress === 100
+                      ? "Sending..."
+                      : "Preparing snap..."
                   : selectedFriends.length === 0
                     ? "Select friends to send"
                     : `Send to ${selectedFriends.length} friend${selectedFriends.length > 1 ? "s" : ""}`}
@@ -1432,7 +1434,11 @@ export function CameraTab() {
         ? "video/webm"
         : "video/mp4";
     try {
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const recorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: 1_500_000,
+        audioBitsPerSecond: 64_000,
+      });
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
       };
@@ -1605,22 +1611,25 @@ export function CameraTab() {
         : snapCaption?.trim() || "📸 Sent a snap";
       void snapContent;
 
-      let anyError: string | null = null;
-      for (const friend of recipientFriends) {
-        const encodedBlobId = isVideo ? `v:${blobId}` : `p:${blobId}`;
-        const result = await backendSendSnap(
-          currentUser.username,
-          friend,
-          encodedBlobId,
-          isEphemeral,
-          !isEphemeral,
-          identity ?? undefined,
-        );
-        if ("err" in result) anyError = result.err;
-      }
+      const encodedBlobId = isVideo ? `v:${blobId}` : `p:${blobId}`;
+      const sendResults = await Promise.all(
+        recipientFriends.map((friend) =>
+          backendSendSnap(
+            currentUser.username,
+            friend,
+            encodedBlobId,
+            isEphemeral,
+            !isEphemeral,
+            identity ?? undefined,
+          ),
+        ),
+      );
+      const anyError = sendResults.find((r) => "err" in r) as
+        | { err: string }
+        | undefined;
 
       if (anyError) {
-        setSendError(`Some snaps failed to send: ${anyError}`);
+        setSendError(`Some snaps failed to send: ${anyError.err}`);
         setSending(false);
         return;
       }
