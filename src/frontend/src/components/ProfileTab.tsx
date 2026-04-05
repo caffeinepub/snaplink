@@ -1,21 +1,33 @@
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Camera,
   Check,
   Edit3,
+  Eye,
+  EyeOff,
+  Ghost,
   LogOut,
   MessageCircle,
   Star,
   Trash2,
+  Trophy,
   Users,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   backendClearAllData,
   backendGetConversations,
   backendGetFriends,
+  backendGetReadReceiptsEnabled,
   backendGetSnapScore,
+  backendIsGhostMode,
+  backendRecordDailyLogin,
+  backendSetGhostMode,
+  backendSetReadReceiptsEnabled,
 } from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
@@ -39,6 +51,13 @@ export function ProfileTab() {
   const [saving, setSaving] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [bestFriends, setBestFriends] = useState<User[]>([]);
+
+  // Privacy settings
+  const [ghostMode, setGhostMode] = useState(false);
+  const [readReceiptsEnabled, setReadReceiptsEnabled] = useState(true);
+  const [ghostLoading, setGhostLoading] = useState(false);
+  const [receiptLoading, setReceiptLoading] = useState(false);
 
   // Clear all data state
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -53,7 +72,7 @@ export function ProfileTab() {
     }
   }, [currentUser]);
 
-  // Load friends, conversations, and snap score from backend
+  // Load friends, conversations, snap score, and privacy settings from backend
   useEffect(() => {
     if (!currentUser) return;
     const refresh = async () => {
@@ -72,11 +91,84 @@ export function ProfileTab() {
       setFriends(f);
       setConversationCount(convs.length);
       setSnapScore(score);
+
+      // Compute best friends: sort conversations by timestamp, take top 3 friends
+      const friendUsernames = new Set(f.map((fr: User) => fr.username));
+      const friendConvs = convs
+        .filter((c: any) => friendUsernames.has(String(c.username)))
+        .sort((a: any, b: any) => {
+          const ta =
+            typeof a.lastMessageTimestamp === "bigint"
+              ? Number(a.lastMessageTimestamp) / 1_000_000
+              : Number(a.lastMessageTimestamp ?? 0);
+          const tb =
+            typeof b.lastMessageTimestamp === "bigint"
+              ? Number(b.lastMessageTimestamp) / 1_000_000
+              : Number(b.lastMessageTimestamp ?? 0);
+          return tb - ta;
+        })
+        .slice(0, 3);
+      const top3 = friendConvs
+        .map((c: any) =>
+          f.find((fr: User) => fr.username === String(c.username)),
+        )
+        .filter(Boolean) as User[];
+      setBestFriends(top3);
     };
     refresh();
     const interval = setInterval(refresh, 5000);
     return () => clearInterval(interval);
   }, [currentUser, identity]);
+
+  // Load privacy settings once on mount
+  useEffect(() => {
+    if (!currentUser) return;
+    const loadPrivacy = async () => {
+      const [ghost, receipts] = await Promise.all([
+        backendIsGhostMode(currentUser.username).catch(() => false),
+        backendGetReadReceiptsEnabled(currentUser.username).catch(() => true),
+      ]);
+      setGhostMode(ghost);
+      setReadReceiptsEnabled(receipts);
+    };
+    loadPrivacy();
+  }, [currentUser]);
+
+  // Record daily login bonus once on mount
+  useEffect(() => {
+    if (!currentUser) return;
+    backendRecordDailyLogin(currentUser.username, identity ?? undefined)
+      .then((pts) => {
+        if (pts > 0) {
+          toast.success(`🎯 +${pts} daily login bonus!`);
+        }
+      })
+      .catch(() => {});
+  }, [currentUser, identity]);
+
+  const handleToggleGhostMode = async (val: boolean) => {
+    if (!currentUser || ghostLoading) return;
+    setGhostLoading(true);
+    setGhostMode(val);
+    await backendSetGhostMode(
+      currentUser.username,
+      val,
+      identity ?? undefined,
+    ).catch(() => {});
+    setGhostLoading(false);
+  };
+
+  const handleToggleReadReceipts = async (val: boolean) => {
+    if (!currentUser || receiptLoading) return;
+    setReceiptLoading(true);
+    setReadReceiptsEnabled(val);
+    await backendSetReadReceiptsEnabled(
+      currentUser.username,
+      val,
+      identity ?? undefined,
+    ).catch(() => {});
+    setReceiptLoading(false);
+  };
 
   const handleSave = () => {
     if (!currentUser) return;
@@ -201,9 +293,12 @@ export function ProfileTab() {
             <div
               className="rounded-full p-0.5"
               style={{
-                background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
-                boxShadow:
-                  "0 0 28px rgba(0,207,255,0.45), 0 0 8px rgba(189,0,255,0.2)",
+                background: ghostMode
+                  ? "linear-gradient(135deg, #555, #999)"
+                  : "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                boxShadow: ghostMode
+                  ? "0 0 28px rgba(150,150,150,0.35)"
+                  : "0 0 28px rgba(0,207,255,0.45), 0 0 8px rgba(189,0,255,0.2)",
               }}
             >
               <div
@@ -228,6 +323,17 @@ export function ProfileTab() {
               <Camera size={14} color="#00CFFF" />
             </div>
           </button>
+          {ghostMode && (
+            <div
+              className="absolute -top-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center"
+              style={{
+                background: "rgba(40,40,60,0.95)",
+                border: "2px solid #1A1A2E",
+              }}
+            >
+              <Ghost size={13} color="#B0B0CC" />
+            </div>
+          )}
         </motion.div>
 
         <AnimatePresence mode="wait">
@@ -325,8 +431,8 @@ export function ProfileTab() {
         </AnimatePresence>
       </div>
 
-      {/* Stats - now 3 columns with Snap Score */}
-      <div className="mx-5 grid grid-cols-3 gap-3 mb-5">
+      {/* Stats - 3 columns with Snap Score */}
+      <div className="mx-5 grid grid-cols-3 gap-3 mb-2">
         <div className="card-surface p-4 flex flex-col items-center gap-1">
           <div className="flex items-center gap-1.5">
             <Users size={18} color="#00CFFF" />
@@ -351,6 +457,151 @@ export function ProfileTab() {
             <span className="text-2xl font-bold text-white">{snapScore}</span>
           </div>
           <p className="text-[#B0B0CC] text-xs">Score</p>
+        </div>
+      </div>
+
+      {/* Snap Score breakdown */}
+      <div className="mx-5 mb-5">
+        <p className="text-[#B0B0CC] text-[10px] text-center mt-1.5">
+          🏅 +10 per snap  •  🔥 +5 streak  •  📅 +2 daily login
+        </p>
+      </div>
+
+      {/* Best Friends */}
+      {bestFriends.length > 0 && (
+        <div className="mx-5 mb-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Trophy size={16} color="#FFAA00" />
+            <p className="text-white font-bold text-base">Best Friends ⭐</p>
+          </div>
+          <div className="flex flex-col gap-2">
+            {bestFriends.map((friend, i) => (
+              <motion.div
+                key={friend.id}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.06 }}
+                className="card-surface p-3.5 flex items-center gap-3"
+                style={{
+                  background: "rgba(255,170,0,0.06)",
+                  border: "1px solid rgba(255,170,0,0.2)",
+                }}
+                data-ocid={`profile.item.${i + 1}`}
+              >
+                <div className="relative">
+                  <UserAvatar
+                    name={friend.displayName}
+                    size={40}
+                    avatarUrl={friend.avatarUrl}
+                  />
+                  <span
+                    className="absolute -top-1 -right-1 text-xs"
+                    aria-label="Best friend"
+                  >
+                    {i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉"}
+                  </span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-white font-semibold text-sm">
+                    {friend.displayName}
+                  </p>
+                  <p className="text-[#B0B0CC] text-xs">@{friend.username}</p>
+                </div>
+                <Star size={14} color="#FFAA00" fill="#FFAA00" />
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Privacy Settings */}
+      <div className="mx-5 mb-5">
+        <p className="text-[#B0B0CC] text-xs font-medium uppercase tracking-widest mb-3">
+          Privacy Settings
+        </p>
+        <div
+          className="rounded-2xl overflow-hidden"
+          style={{ background: "#1A1F33", border: "1px solid #2A3048" }}
+        >
+          {/* Ghost Mode */}
+          <div className="flex items-center justify-between px-4 py-4">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{
+                  background: ghostMode
+                    ? "rgba(150,150,200,0.15)"
+                    : "rgba(255,255,255,0.06)",
+                }}
+              >
+                <Ghost size={18} color={ghostMode ? "#B0B0FF" : "#B0B0CC"} />
+              </div>
+              <div>
+                <Label
+                  htmlFor="ghost-mode-switch"
+                  className="text-white text-sm font-semibold cursor-pointer"
+                >
+                  Ghost Mode
+                </Label>
+                <p className="text-[#B0B0CC] text-xs mt-0.5">
+                  Hide your online status from friends
+                </p>
+              </div>
+            </div>
+            <Switch
+              id="ghost-mode-switch"
+              checked={ghostMode}
+              onCheckedChange={handleToggleGhostMode}
+              disabled={ghostLoading}
+              data-ocid="profile.switch"
+            />
+          </div>
+
+          <div
+            style={{
+              height: 1,
+              background: "rgba(42,48,72,0.7)",
+              margin: "0 16px",
+            }}
+          />
+
+          {/* Read Receipts */}
+          <div className="flex items-center justify-between px-4 py-4">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{
+                  background: readReceiptsEnabled
+                    ? "rgba(0,207,255,0.1)"
+                    : "rgba(255,255,255,0.06)",
+                }}
+              >
+                {readReceiptsEnabled ? (
+                  <Eye size={18} color="#00CFFF" />
+                ) : (
+                  <EyeOff size={18} color="#B0B0CC" />
+                )}
+              </div>
+              <div>
+                <Label
+                  htmlFor="read-receipts-switch"
+                  className="text-white text-sm font-semibold cursor-pointer"
+                >
+                  Read Receipts
+                </Label>
+                <p className="text-[#B0B0CC] text-xs mt-0.5">
+                  Let friends know when you've read their messages
+                </p>
+              </div>
+            </div>
+            <Switch
+              id="read-receipts-switch"
+              checked={readReceiptsEnabled}
+              onCheckedChange={handleToggleReadReceipts}
+              disabled={receiptLoading}
+              data-ocid="profile.switch"
+            />
+          </div>
         </div>
       </div>
 
@@ -519,7 +770,7 @@ export function ProfileTab() {
         </AnimatePresence>
       </div>
 
-      {/* Friends list */}
+      {/* All Friends list */}
       {friends.length > 0 && (
         <div className="mx-5 mb-5">
           <p className="text-white font-bold text-base mb-3">

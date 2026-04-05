@@ -760,6 +760,72 @@ export async function backendGetSnapScore(
   }
 }
 
+// ─── Daily Login Bonus ───────────────────────────────────────────────────────
+
+export async function backendRecordDailyLogin(
+  callerUsername: string,
+  identity?: Identity,
+): Promise<number> {
+  try {
+    const a = await actor(identity);
+    return Number(await a.recordDailyLogin(callerUsername));
+  } catch {
+    return 0;
+  }
+}
+
+// ─── Ghost Mode ──────────────────────────────────────────────────────────────
+
+export async function backendSetGhostMode(
+  callerUsername: string,
+  enabled: boolean,
+  identity?: Identity,
+): Promise<{ ok: null } | { err: string }> {
+  try {
+    const a = await actor(identity);
+    const result = await a.setGhostMode(callerUsername, enabled);
+    if ("ok" in result) return { ok: null };
+    return { err: result.err };
+  } catch (e) {
+    return { err: sanitizeError(e) };
+  }
+}
+
+export async function backendIsGhostMode(username: string): Promise<boolean> {
+  try {
+    const a = await anonActor();
+    return Boolean(await a.isGhostMode(username));
+  } catch {
+    return false;
+  }
+}
+
+// ─── Read Receipts Toggle ────────────────────────────────────────────────────
+
+export async function backendSetReadReceiptsEnabled(
+  callerUsername: string,
+  enabled: boolean,
+  identity?: Identity,
+): Promise<void> {
+  try {
+    const a = await actor(identity);
+    await a.setReadReceiptsEnabled(callerUsername, enabled);
+  } catch {
+    // ignore
+  }
+}
+
+export async function backendGetReadReceiptsEnabled(
+  username: string,
+): Promise<boolean> {
+  try {
+    const a = await anonActor();
+    return Boolean(await a.getReadReceiptsEnabled(username));
+  } catch {
+    return true; // default to enabled
+  }
+}
+
 // ─── Blob storage helpers ─────────────────────────────────────────────────────
 
 export async function backendUploadSnapMedia(

@@ -4,8 +4,10 @@ import {
   Check,
   CheckCheck,
   Image,
+  MapPin,
   MessageCircle,
   MessageSquarePlus,
+  Mic,
   Plus,
   Search,
   Send,
@@ -16,6 +18,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   backendAddReaction,
   backendCreateGroup,
@@ -26,6 +29,7 @@ import {
   backendGetGroups,
   backendGetMessages,
   backendGetReactions,
+  backendGetReadReceiptsEnabled,
   backendGetSnapUrl,
   backendGetStreak,
   backendMarkMessageRead,
@@ -120,6 +124,7 @@ function mapBackendMessage(msg: any): Message & { snapBlobId?: string } {
     snapDataUrl: undefined,
   };
 }
+
 // ─── Story Viewer ─────────────────────────────────────────────────────────────
 
 function StoryViewer({
@@ -131,72 +136,93 @@ function StoryViewer({
   mediaUrl: string | null;
   onClose: () => void;
 }) {
+  const timeLeft = formatTimeLeft(story.expiresAt);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
-      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.97)" }}
+      className="fixed inset-0 z-50 flex flex-col"
+      style={{ background: "#000" }}
       onClick={onClose}
     >
-      <button
-        type="button"
-        className="absolute top-10 right-4 z-10 w-10 h-10 rounded-full flex items-center justify-center"
-        style={{ background: "rgba(255,255,255,0.15)" }}
-        onClick={onClose}
+      {/* Progress bar */}
+      <div
+        className="absolute top-0 left-0 right-0 h-0.5 z-10"
+        style={{ background: "rgba(255,255,255,0.2)" }}
       >
-        <X size={20} color="white" />
-      </button>
-
-      <div className="absolute top-10 left-4 right-14">
-        <p className="text-white font-bold text-sm">
-          {story.authorDisplayName}
-        </p>
-        <p className="text-[#B0B0CC] text-xs">
-          @{story.authorUsername} · {formatTimeLeft(story.expiresAt)}
-        </p>
+        <motion.div
+          initial={{ width: "0%" }}
+          animate={{ width: "100%" }}
+          transition={{ duration: 5, ease: "linear" }}
+          className="h-full"
+          style={{ background: "white" }}
+          onAnimationComplete={onClose}
+        />
       </div>
 
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: overlay closes on click */}
+      {/* Header */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops propagation only, not interactive */}
       <div
-        className="w-full max-w-sm px-4"
+        className="absolute top-0 left-0 right-0 flex items-center gap-3 px-4 pt-10 pb-4 z-10"
+        style={{
+          background:
+            "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
+        <UserAvatar name={story.authorDisplayName} size={36} />
+        <div className="flex-1">
+          <p className="text-white font-semibold text-sm">
+            {story.authorDisplayName}
+          </p>
+          <p className="text-white/60 text-xs">{timeLeft}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-9 h-9 rounded-full flex items-center justify-center"
+          style={{ background: "rgba(255,255,255,0.15)" }}
+        >
+          <X size={18} color="white" />
+        </button>
+      </div>
+
+      {/* Media */}
+      <div className="flex-1 flex items-center justify-center">
         {mediaUrl ? (
           <img
             src={mediaUrl}
             alt="story"
-            className="w-full rounded-2xl"
-            style={{ maxHeight: "70vh", objectFit: "contain" }}
+            className="w-full h-full object-cover"
           />
         ) : (
           <div
-            className="w-full h-64 rounded-2xl flex items-center justify-center"
+            className="w-full h-full flex flex-col items-center justify-center gap-4"
             style={{ background: "#1A1F33" }}
           >
             <Camera size={48} color="#B0B0CC" />
-          </div>
-        )}
-        {story.caption && (
-          <div
-            className="mt-3 px-4 py-2.5 rounded-xl text-center"
-            style={{ background: "rgba(0,0,0,0.7)" }}
-          >
-            <p className="text-white text-sm">{story.caption}</p>
+            <p className="text-[#B0B0CC] text-sm">Loading story...</p>
           </div>
         )}
       </div>
 
-      <p className="absolute bottom-8 text-[#B0B0CC] text-xs">
-        Tap anywhere to close
-      </p>
+      {story.caption && (
+        <div className="absolute bottom-8 left-0 right-0 px-4 z-10">
+          <div
+            className="px-4 py-2 rounded-2xl text-center"
+            style={{ background: "rgba(0,0,0,0.7)" }}
+          >
+            <p className="text-white text-sm">{story.caption}</p>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }
 
-// ─── Story Row ────────────────────────────────────────────────────────────────
+// ─── Stories Row ──────────────────────────────────────────────────────────────
 
 function StoriesRow({
   currentUsername,
@@ -417,7 +443,6 @@ function AddStorySheet({
           </button>
         </div>
 
-        {/* Photo picker */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -449,7 +474,6 @@ function AddStorySheet({
           onChange={handleFileChange}
         />
 
-        {/* Caption */}
         <input
           className="w-full bg-transparent text-white text-sm px-4 py-3 rounded-2xl mb-3 outline-none"
           style={{
@@ -475,11 +499,13 @@ function AddStorySheet({
           style={{
             background: posted
               ? "linear-gradient(135deg, #00CFFF, #00AA88)"
-              : "linear-gradient(135deg, #00CFFF, #BD00FF)",
+              : selectedFile
+                ? "linear-gradient(135deg, #00CFFF, #BD00FF)"
+                : "#2A3048",
             opacity: !selectedFile ? 0.5 : 1,
           }}
         >
-          {posted ? "Posted! ✓" : posting ? "Posting..." : "Post to My Story"}
+          {posted ? "Posted!" : posting ? "Posting..." : "Post Story"}
         </PressableButton>
       </motion.div>
     </motion.div>
@@ -488,7 +514,14 @@ function AddStorySheet({
 
 // ─── Reaction Picker ──────────────────────────────────────────────────────────
 
-const REACTION_EMOJIS = ["❤️", "😂", "😮", "😢", "😡", "👍"];
+const REACTION_EMOJIS = [
+  "\u2764\uFE0F",
+  "\uD83D\uDE02",
+  "\uD83D\uDE2E",
+  "\uD83D\uDE22",
+  "\uD83D\uDE21",
+  "\uD83D\uDC4D",
+];
 
 function ReactionPicker({
   onSelect,
@@ -534,7 +567,6 @@ function ReactionPicker({
 
 function ReactionPills({ reactions }: { reactions: Reaction[] }) {
   if (reactions.length === 0) return null;
-  // Group by emoji
   const grouped: Record<string, number> = {};
   for (const r of reactions) {
     grouped[r.emoji] = (grouped[r.emoji] ?? 0) + 1;
@@ -635,7 +667,7 @@ function SnapViewer({
         style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
       >
         <span className="text-white text-xs font-semibold tracking-wide select-none">
-          🚫 Screenshots are not allowed
+          \uD83D\uDEAB Screenshots are not allowed
         </span>
       </div>
 
@@ -655,9 +687,9 @@ function SnapViewer({
             : `Sent to @${msg.receiverId}`}
         </p>
         {msg.content &&
-          msg.content !== "📸 Sent a snap" &&
-          msg.content !== "📹 Sent a video snap" &&
-          msg.content !== "📷 Sent a photo" && (
+          msg.content !== "\uD83D\uDCF8 Sent a snap" &&
+          msg.content !== "\uD83D\uDCF9 Sent a video snap" &&
+          msg.content !== "\uD83D\uDCF7 Sent a photo" && (
             <p className="text-[#B0B0CC] text-xs mt-0.5">{msg.content}</p>
           )}
       </div>
@@ -749,7 +781,9 @@ function SnapBubble({
       >
         <Camera size={16} color="#00CFFF" />
         <span className="text-sm font-semibold" style={{ color: "#00CFFF" }}>
-          {msg.isVideo ? "🎥 Tap to open video" : "📸 Tap to open snap"}
+          {msg.isVideo
+            ? "\uD83C\uDFA5 Tap to open video"
+            : "\uD83D\uDCF8 Tap to open snap"}
         </span>
       </motion.button>
     );
@@ -766,37 +800,74 @@ function SnapBubble({
         <div className="relative">
           <img
             src={previewSrc}
-            alt="snap preview"
-            className="max-w-full rounded-2xl"
-            style={{ maxHeight: 160, objectFit: "cover", width: "100%" }}
+            alt="snap"
+            className="w-full rounded-2xl"
+            style={{ maxHeight: 200, objectFit: "cover" }}
           />
           <div
-            className="absolute bottom-0 left-0 right-0 px-3 py-2 rounded-b-2xl"
-            style={{ background: "rgba(0,0,0,0.5)" }}
+            className="absolute inset-0 flex items-center justify-center rounded-2xl"
+            style={{ background: "rgba(0,0,0,0.3)" }}
           >
-            <span className="text-xs text-white">
-              {isViewed ? "✓ Seen" : "Sent"}
-            </span>
+            <Camera size={24} color="white" />
           </div>
         </div>
       ) : (
         <div
-          className="flex items-center gap-2 px-4 py-3"
-          style={{ background: "linear-gradient(135deg, #00CFFF, #0099CC)" }}
+          className="flex items-center gap-2 px-4 py-3 rounded-2xl"
+          style={{
+            background: "linear-gradient(135deg, #00CFFF22, #BD00FF22)",
+            border: "1px solid rgba(0,207,255,0.3)",
+          }}
         >
-          <Camera size={16} color="white" />
+          <Camera size={16} color="#00CFFF" />
           <span className="text-sm font-medium text-white">
             {msg.isVideo
-              ? isViewed
-                ? "🎥 Video seen"
-                : "🎥 Video sent"
-              : isViewed
-                ? "📸 Snap seen"
-                : "📸 Snap sent"}
+              ? "\uD83C\uDFA5 Video snap sent"
+              : "\uD83D\uDCF8 Snap sent"}
           </span>
         </div>
       )}
     </button>
+  );
+}
+
+// ─── Voice Message Bubble ─────────────────────────────────────────────────────
+
+function VoiceMessageBubble({ messageId }: { messageId: string }) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem(`voiceMsg_${messageId}`);
+    setAudioUrl(stored);
+  }, [messageId]);
+
+  if (audioUrl) {
+    return (
+      <div
+        className="flex items-center gap-2 px-3 py-2 rounded-2xl"
+        style={{
+          background: "rgba(0,207,255,0.08)",
+          border: "1px solid rgba(0,207,255,0.2)",
+        }}
+      >
+        <Mic size={16} color="#00CFFF" />
+        {/* biome-ignore lint/a11y/useMediaCaption: voice message playback */}
+        <audio controls src={audioUrl} style={{ height: 32, maxWidth: 180 }} />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl"
+      style={{
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.1)",
+      }}
+    >
+      <Mic size={14} color="#B0B0CC" />
+      <span className="text-sm text-[#B0B0CC]">\uD83C\uDFA4 Voice message</span>
+    </div>
   );
 }
 
@@ -823,13 +894,12 @@ function NewChatSheet({
       .finally(() => setLoading(false));
   }, [currentUser, identity]);
 
-  const filtered = query.trim()
-    ? friends.filter(
-        (f) =>
-          f.displayName.toLowerCase().includes(query.toLowerCase()) ||
-          f.username.toLowerCase().includes(query.toLowerCase()),
-      )
-    : friends;
+  const filtered = friends.filter(
+    (f) =>
+      !query.trim() ||
+      f.displayName.toLowerCase().includes(query.toLowerCase()) ||
+      f.username.toLowerCase().includes(query.toLowerCase()),
+  );
 
   return (
     <motion.div
@@ -846,8 +916,9 @@ function NewChatSheet({
         exit={{ y: "100%" }}
         transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.35 }}
         className="rounded-t-3xl px-5 pt-5 pb-8"
-        style={{ background: "#1A1F33", maxHeight: "75vh", overflowY: "auto" }}
+        style={{ background: "#1A1F33", maxHeight: "80vh", overflowY: "auto" }}
         onClick={(e) => e.stopPropagation()}
+        data-ocid="chats.sheet"
       >
         <div className="flex justify-center mb-4">
           <div
@@ -862,6 +933,7 @@ function NewChatSheet({
             onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center"
             style={{ background: "rgba(255,255,255,0.08)" }}
+            data-ocid="chats.close_button"
           >
             <X size={16} color="#B0B0CC" />
           </button>
@@ -870,8 +942,8 @@ function NewChatSheet({
         <div
           className="relative mb-4"
           style={{
-            background: "rgba(255,255,255,0.05)",
-            borderRadius: 14,
+            background: "rgba(255,255,255,0.04)",
+            borderRadius: 12,
             border: "1px solid rgba(255,255,255,0.08)",
           }}
         >
@@ -881,22 +953,12 @@ function NewChatSheet({
             color="#B0B0CC"
           />
           <input
-            className="w-full bg-transparent text-white text-sm pl-9 pr-8 py-2.5 outline-none placeholder-[#B0B0CC]"
+            className="w-full bg-transparent text-white text-sm pl-9 pr-4 py-2.5 outline-none"
             placeholder="Search friends..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            // biome-ignore lint/a11y/noAutofocus: intentional focus for search UX
-            autoFocus
+            data-ocid="chats.search_input"
           />
-          {query && (
-            <button
-              type="button"
-              onClick={() => setQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2"
-            >
-              <X size={12} color="#B0B0CC" />
-            </button>
-          )}
         </div>
 
         {loading ? (
@@ -1043,7 +1105,6 @@ function NewGroupSheet({
           </button>
         </div>
 
-        {/* Group name */}
         <input
           className="w-full bg-transparent text-white text-sm px-4 py-3 rounded-2xl mb-4 outline-none"
           style={{
@@ -1213,7 +1274,6 @@ function GroupChatView({
     setSending(true);
     setInputText("");
 
-    // Optimistic
     const optimistic: GroupMessage = {
       id: `opt-${Date.now()}`,
       groupId: group.id,
@@ -1345,6 +1405,102 @@ function GroupChatView({
   );
 }
 
+// ─── Location Sheet ───────────────────────────────────────────────────────────
+
+function LocationSheet({
+  onSelect,
+  onClose,
+  sharing,
+}: {
+  onSelect: (label: string, ms: number) => void;
+  onClose: () => void;
+  sharing: boolean;
+}) {
+  const options: { label: string; ms: number }[] = [
+    { label: "15 minutes", ms: 15 * 60 * 1000 },
+    { label: "1 hour", ms: 60 * 60 * 1000 },
+    { label: "8 hours", ms: 8 * 60 * 60 * 1000 },
+  ];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      style={{ background: "rgba(0,0,0,0.6)" }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.3 }}
+        className="rounded-t-3xl px-5 pt-5 pb-10"
+        style={{ background: "#1A1F33" }}
+        onClick={(e) => e.stopPropagation()}
+        data-ocid="chats.sheet"
+      >
+        <div className="flex justify-center mb-4">
+          <div
+            className="w-10 h-1 rounded-full"
+            style={{ background: "rgba(255,255,255,0.15)" }}
+          />
+        </div>
+        <div className="flex items-center gap-3 mb-5">
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(0,207,255,0.15)" }}
+          >
+            <MapPin size={20} color="#00CFFF" />
+          </div>
+          <div>
+            <p className="text-white font-bold text-base">Share Location</p>
+            <p className="text-[#B0B0CC] text-xs">
+              How long should your location be visible?
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2 mb-4">
+          {options.map((opt) => (
+            <button
+              key={opt.label}
+              type="button"
+              disabled={sharing}
+              onClick={() => onSelect(opt.label, opt.ms)}
+              className="w-full py-3.5 rounded-2xl text-sm font-semibold text-white flex items-center justify-center gap-2 active:scale-98 transition-transform"
+              style={{
+                background: "rgba(0,207,255,0.1)",
+                border: "1px solid rgba(0,207,255,0.25)",
+                opacity: sharing ? 0.6 : 1,
+              }}
+              data-ocid="chats.button"
+            >
+              <MapPin size={15} color="#00CFFF" />
+              {sharing ? "Getting location..." : opt.label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full py-3 rounded-2xl text-sm font-semibold"
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            color: "#B0B0CC",
+          }}
+          data-ocid="chats.cancel_button"
+        >
+          Cancel
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Conversation List ────────────────────────────────────────────────────────
 
 function ConversationList({
@@ -1384,7 +1540,6 @@ function ConversationList({
       setConversations(mapped);
       setGroups(grps);
 
-      // Load streaks in parallel for each conversation
       const streakEntries = await Promise.all(
         mapped.map(async (c) => {
           const streak = await backendGetStreak(
@@ -1443,7 +1598,6 @@ function ConversationList({
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">Chats</h1>
           <div className="flex gap-2">
-            {/* New Group button */}
             <PressableButton
               onClick={() => setShowNewGroup(true)}
               className="flex items-center gap-1 px-2.5 py-2 rounded-full text-xs font-semibold"
@@ -1457,7 +1611,6 @@ function ConversationList({
               <Users size={14} />
               <span>Group</span>
             </PressableButton>
-            {/* New Chat button */}
             <PressableButton
               onClick={() => setShowNewChat(true)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
@@ -1618,7 +1771,7 @@ function ConversationList({
                             color: "#FF7800",
                           }}
                         >
-                          🔥 {streak}
+                          \uD83D\uDD25 {streak}
                         </span>
                       )}
                     </div>
@@ -1710,8 +1863,19 @@ function ChatView({
     null,
   );
   const [streak, setStreak] = useState(0);
-  const [disappearTimer, setDisappearTimer] = useState<number>(0); // 0 = off, else seconds
+  const [disappearTimer, setDisappearTimer] = useState<number>(0);
   const [showTimerSheet, setShowTimerSheet] = useState(false);
+  // Read receipts: whether the RECIPIENT has receipts enabled
+  const [recipientReadReceipts, setRecipientReadReceipts] = useState(true);
+  // Voice recording
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
+  const mediaRecorderSupported = typeof MediaRecorder !== "undefined";
+  // Location sharing
+  const [showLocationSheet, setShowLocationSheet] = useState(false);
+  const [sharingLocation, setSharingLocation] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1726,7 +1890,6 @@ function ChatView({
       );
       const mapped = rawMsgs.map(mapBackendMessage);
       setMessages(mapped);
-      // Mark received messages as read
       for (const msg of mapped) {
         if (!msg.isRead && msg.receiverId === currentUser.username) {
           backendMarkMessageRead(
@@ -1736,7 +1899,6 @@ function ChatView({
           ).catch(() => {});
         }
       }
-      // Load reactions for all messages
       const reactionResults = await Promise.all(
         mapped.map(async (msg) => {
           const r = await backendGetReactions(msg.id);
@@ -1765,6 +1927,13 @@ function ChatView({
       .catch(() => {});
   }, [currentUser, username]);
 
+  // Load recipient read receipts preference once per conversation
+  useEffect(() => {
+    backendGetReadReceiptsEnabled(username)
+      .then(setRecipientReadReceipts)
+      .catch(() => setRecipientReadReceipts(true));
+  }, [username]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional scroll on message count change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1776,7 +1945,6 @@ function ChatView({
     setSending(true);
     setInputText("");
 
-    // Embed disappear tag into content if timer is set
     const encodedContent =
       disappearTimer > 0 ? `[DISAPPEAR:${disappearTimer}]${text}` : text;
 
@@ -1803,7 +1971,162 @@ function ChatView({
     setSending(false);
   };
 
-  // Filter out expired disappearing messages client-side using embedded tag
+  // ── Voice recording ─────────────────────────────────────────────────────────
+  const handleMicPointerDown = useCallback(() => {
+    if (!mediaRecorderSupported) return;
+    voiceChunksRef.current = [];
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then((stream) => {
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : MediaRecorder.isTypeSupported("audio/ogg")
+            ? "audio/ogg"
+            : "";
+        const recorder = new MediaRecorder(
+          stream,
+          mimeType ? { mimeType } : {},
+        );
+        recorder.ondataavailable = (e) => {
+          if (e.data?.size > 0) voiceChunksRef.current.push(e.data);
+        };
+        recorder.onstop = () => {
+          const blob = new Blob(voiceChunksRef.current, {
+            type: mimeType || "audio/webm",
+          });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const dataUrl = reader.result as string;
+            if (!currentUser) return;
+            // Send voice message to backend
+            const msgContent = "\uD83C\uDFA4 Voice message";
+            const encodedContent =
+              disappearTimer > 0
+                ? `[DISAPPEAR:${disappearTimer}]${msgContent}`
+                : msgContent;
+            const optimistic: Message & { snapBlobId?: string } = {
+              id: `opt-voice-${Date.now()}`,
+              senderId: currentUser.username,
+              receiverId: username,
+              content: encodedContent,
+              timestamp: Date.now(),
+              isRead: false,
+              isSnap: false,
+              isEphemeral: false,
+              snapViewed: false,
+            };
+            setMessages((prev) => [...prev, optimistic]);
+            backendSendMessage(
+              currentUser.username,
+              username,
+              encodedContent,
+              identity ?? undefined,
+            )
+              .then((res) => {
+                if ("ok" in res) {
+                  const msgId = String((res.ok as any).id ?? "");
+                  if (msgId) {
+                    sessionStorage.setItem(`voiceMsg_${msgId}`, dataUrl);
+                  }
+                }
+                return refresh();
+              })
+              .catch(() => {});
+            // Store with optimistic id too so current user sees it
+            sessionStorage.setItem(`voiceMsg_${optimistic.id}`, dataUrl);
+          };
+          reader.readAsDataURL(blob);
+          for (const t of stream.getTracks()) {
+            t.stop();
+          }
+        };
+        recorder.start(100);
+        mediaRecorderRef.current = recorder;
+        setIsRecording(true);
+      })
+      .catch(() => {
+        toast.error("Microphone access denied.");
+      });
+  }, [
+    mediaRecorderSupported,
+    currentUser,
+    username,
+    identity,
+    refresh,
+    disappearTimer,
+  ]);
+
+  const handleMicPointerUp = useCallback(() => {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }, []);
+
+  // ── Location sharing ─────────────────────────────────────────────────────────
+  const handleShareLocation = useCallback(
+    (durationLabel: string) => {
+      setShowLocationSheet(false);
+      if (!currentUser) return;
+      setSharingLocation(true);
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const { latitude, longitude } = pos.coords;
+          try {
+            const resp = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+            );
+            const data = await resp.json();
+            const city =
+              data.address?.city ||
+              data.address?.town ||
+              data.address?.village ||
+              data.address?.county ||
+              "";
+            const state = data.address?.state || data.address?.country || "";
+            const locationText = city
+              ? `\uD83D\uDCCD ${city}${state ? `, ${state}` : ""} \u2014 shared for ${durationLabel}`
+              : `\uD83D\uDCCD Location shared \u2014 for ${durationLabel}`;
+            const encodedContent =
+              disappearTimer > 0
+                ? `[DISAPPEAR:${disappearTimer}]${locationText}`
+                : locationText;
+            const optimistic: Message & { snapBlobId?: string } = {
+              id: `opt-loc-${Date.now()}`,
+              senderId: currentUser.username,
+              receiverId: username,
+              content: encodedContent,
+              timestamp: Date.now(),
+              isRead: false,
+              isSnap: false,
+              isEphemeral: false,
+              snapViewed: false,
+            };
+            setMessages((prev) => [...prev, optimistic]);
+            await backendSendMessage(
+              currentUser.username,
+              username,
+              encodedContent,
+              identity ?? undefined,
+            );
+            await refresh();
+          } catch {
+            toast.error("Could not get location.");
+          }
+          setSharingLocation(false);
+        },
+        () => {
+          toast.error("Location access denied.");
+          setSharingLocation(false);
+        },
+      );
+    },
+    [currentUser, username, identity, refresh, disappearTimer],
+  );
+
   const visibleMessages = messages.filter((msg) => {
     const { seconds } = parseDisappearTag(msg.content);
     if (seconds === 0) return true;
@@ -1864,6 +2187,9 @@ function ChatView({
     }
   };
 
+  const isVoiceMessage = (content: string) =>
+    parseDisappearTag(content).cleanContent === "\uD83C\uDFA4 Voice message";
+
   return (
     <div className="flex flex-col h-full" style={{ background: "#1A1A2E" }}>
       {/* Header */}
@@ -1890,7 +2216,7 @@ function ChatView({
                 className="text-xs font-bold px-1.5 py-0.5 rounded-full"
                 style={{ background: "rgba(255,120,0,0.15)", color: "#FF7800" }}
               >
-                🔥 {streak} day{streak !== 1 ? "s" : ""}
+                \uD83D\uDD25 {streak} day{streak !== 1 ? "s" : ""}
               </span>
             )}
           </div>
@@ -1915,7 +2241,7 @@ function ChatView({
         {visibleMessages.length === 0 && (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-[#B0B0CC] text-sm">
-              Say hi to {displayName}! 👋
+              Say hi to {displayName}! \uD83D\uDC4B
             </p>
           </div>
         )}
@@ -1945,9 +2271,15 @@ function ChatView({
                       snapMediaUrl={snapMediaUrls[msg.id]}
                       onOpenSnap={handleOpenSnap}
                     />
+                  ) : isVoiceMessage(msg.content) ? (
+                    <VoiceMessageBubble messageId={msg.id} />
                   ) : (
                     <div
-                      className={`px-4 py-2.5 ${isSent ? "message-bubble-sent" : "message-bubble-received"}`}
+                      className={`px-4 py-2.5 ${
+                        isSent
+                          ? "message-bubble-sent"
+                          : "message-bubble-received"
+                      }`}
                     >
                       <p
                         className="text-sm"
@@ -1973,7 +2305,9 @@ function ChatView({
                 <ReactionPills reactions={msgReactions} />
 
                 <div
-                  className={`flex items-center gap-1 mt-1 ${isSent ? "justify-end" : "justify-start"}`}
+                  className={`flex items-center gap-1 mt-1 ${
+                    isSent ? "justify-end" : "justify-start"
+                  }`}
                 >
                   <span className="text-[10px]" style={{ color: "#B0B0CC" }}>
                     {formatTime(msg.timestamp)}
@@ -1992,7 +2326,9 @@ function ChatView({
                       </span>
                     );
                   })()}
+                  {/* Read receipts — only show if recipient has them enabled */}
                   {isSent &&
+                    recipientReadReceipts &&
                     (msg.isRead ? (
                       <CheckCheck size={12} color="#00CFFF" />
                     ) : (
@@ -2011,7 +2347,7 @@ function ChatView({
         className="flex flex-col"
         style={{ borderTop: "1px solid #2A3048", background: "#1A1F33" }}
       >
-        {/* Timer sheet */}
+        {/* Disappear timer options */}
         {showTimerSheet && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
@@ -2059,15 +2395,30 @@ function ChatView({
             ))}
           </motion.div>
         )}
-        <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex items-center gap-2 px-4 py-3">
+          {/* Camera / gallery button */}
           <button
             type="button"
             onClick={onCamera}
-            className="p-2"
+            className="p-2 flex-shrink-0"
             data-ocid="chats.secondary_button"
           >
             <Image size={22} color="#B0B0CC" />
           </button>
+
+          {/* Location button */}
+          <button
+            type="button"
+            onClick={() => setShowLocationSheet(true)}
+            className="p-2 flex-shrink-0"
+            aria-label="Share location"
+            data-ocid="chats.toggle"
+            style={{ opacity: sharingLocation ? 0.5 : 1 }}
+          >
+            <MapPin size={20} color={sharingLocation ? "#00CFFF" : "#B0B0CC"} />
+          </button>
+
+          {/* Text input */}
           <input
             className="flex-1 py-2.5 px-4 text-sm rounded-full"
             style={{
@@ -2075,6 +2426,7 @@ function ChatView({
               border: "1px solid #2A3048",
               color: "#FFFFFF",
               outline: "none",
+              minWidth: 0,
             }}
             placeholder="Message..."
             value={inputText}
@@ -2084,11 +2436,12 @@ function ChatView({
             }}
             data-ocid="chats.input"
           />
+
           {/* Disappear timer button */}
           <button
             type="button"
             onClick={() => setShowTimerSheet((s) => !s)}
-            className="relative p-2 rounded-full transition-all"
+            className="relative p-2 rounded-full transition-all flex-shrink-0"
             style={{
               background:
                 disappearTimer > 0 ? "rgba(255,136,0,0.15)" : "transparent",
@@ -2107,6 +2460,36 @@ function ChatView({
               />
             )}
           </button>
+
+          {/* Mic button — hold to record */}
+          {mediaRecorderSupported && (
+            <button
+              type="button"
+              onPointerDown={handleMicPointerDown}
+              onPointerUp={handleMicPointerUp}
+              onPointerLeave={handleMicPointerUp}
+              className="relative p-2 rounded-full transition-all flex-shrink-0"
+              style={{
+                background: isRecording ? "rgba(255,59,59,0.2)" : "transparent",
+                touchAction: "none",
+              }}
+              aria-label="Hold to record voice message"
+              data-ocid="chats.toggle"
+            >
+              <Mic size={20} color={isRecording ? "#FF3B3B" : "#B0B0CC"} />
+              {isRecording && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full"
+                  style={{
+                    background: "#FF3B3B",
+                    animation: "pulse 1s ease-in-out infinite",
+                  }}
+                />
+              )}
+            </button>
+          )}
+
+          {/* Send button */}
           <PressableButton
             onClick={handleSend}
             disabled={!inputText.trim() || sending}
@@ -2139,6 +2522,17 @@ function ChatView({
               ).catch(() => {});
               refresh();
             }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Location sheet */}
+      <AnimatePresence>
+        {showLocationSheet && (
+          <LocationSheet
+            onSelect={(label) => handleShareLocation(label)}
+            onClose={() => setShowLocationSheet(false)}
+            sharing={sharingLocation}
           />
         )}
       </AnimatePresence>

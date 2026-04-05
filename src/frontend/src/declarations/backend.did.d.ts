@@ -48,7 +48,40 @@ export interface ConversationEntry {
   unreadCount: bigint;
 }
 
-// Exact mapping of every public method in main.mo
+export interface Story {
+  id: string;
+  authorUsername: string;
+  authorDisplayName: string;
+  blobId: string;
+  caption: string;
+  timestamp: bigint;
+  expiresAt: bigint;
+}
+
+export interface Reaction {
+  username: string;
+  emoji: string;
+  timestamp: bigint;
+}
+
+export interface GroupInfo {
+  id: string;
+  name: string;
+  createdBy: string;
+  members: string[];
+  createdAt: bigint;
+}
+
+export interface GroupMessage {
+  id: string;
+  groupId: string;
+  senderUsername: string;
+  content: string;
+  timestamp: bigint;
+  isSnap: boolean;
+  snapBlobId: [] | [string];
+}
+
 export interface _SERVICE {
   // Auth
   register: ActorMethod<[string, string, string], { ok: UserProfile } | { err: string }>;
@@ -56,17 +89,16 @@ export interface _SERVICE {
   loginWithII: ActorMethod<[], { ok: UserProfile } | { err: string }>;
   registerWithII: ActorMethod<[string, string], { ok: UserProfile } | { err: string }>;
   getProfile: ActorMethod<[string], [] | [UserProfile]>;
-  // callerUsername, displayName, bio
   updateProfile: ActorMethod<[string, string, string], { ok: null } | { err: string }>;
   searchUsers: ActorMethod<[string], UserProfile[]>;
   getAllUsers: ActorMethod<[], UserProfile[]>;
-  // Connections — callerUsername is always first
+  // Connections
   sendConnectionRequest: ActorMethod<[string, string], { ok: null } | { err: string }>;
   respondToRequest: ActorMethod<[string, string, boolean], { ok: null } | { err: string }>;
   getPendingRequests: ActorMethod<[string], ConnectionRequest[]>;
   getSentRequests: ActorMethod<[string], ConnectionRequest[]>;
   getFriends: ActorMethod<[string], UserProfile[]>;
-  // Messaging — callerUsername is always first
+  // Messaging
   sendMessage: ActorMethod<[string, string, string], { ok: Message } | { err: string }>;
   sendSnap: ActorMethod<[string, string, string, boolean, boolean], { ok: Message } | { err: string }>;
   getMessages: ActorMethod<[string, string, bigint], Message[]>;
@@ -75,6 +107,29 @@ export interface _SERVICE {
   getUnreadCount: ActorMethod<[string], bigint>;
   getPendingRequestCount: ActorMethod<[string], bigint>;
   getConversations: ActorMethod<[string], ConversationEntry[]>;
+  // Stories
+  postStory: ActorMethod<[string, string, string], { ok: null } | { err: string }>;
+  getFriendStories: ActorMethod<[string], Story[]>;
+  // Reactions
+  addReaction: ActorMethod<[string, string, string], { ok: null } | { err: string }>;
+  getReactions: ActorMethod<[string], Reaction[]>;
+  // Groups
+  createGroup: ActorMethod<[string, string, string[]], { ok: GroupInfo } | { err: string }>;
+  getGroups: ActorMethod<[string], GroupInfo[]>;
+  sendGroupMessage: ActorMethod<[string, string, string], { ok: GroupMessage } | { err: string }>;
+  getGroupMessages: ActorMethod<[string, string, bigint], GroupMessage[]>;
+  // Streaks
+  getStreak: ActorMethod<[string, string], bigint>;
+  // Snap Score
+  getSnapScore: ActorMethod<[string], bigint>;
+  // Ghost Mode
+  setGhostMode: ActorMethod<[string, boolean], { ok: null } | { err: string }>;
+  isGhostMode: ActorMethod<[string], boolean>;
+  // Read Receipts
+  setReadReceiptsEnabled: ActorMethod<[string, boolean], { ok: null } | { err: string }>;
+  getReadReceiptsEnabled: ActorMethod<[string], boolean>;
+  // Daily Login
+  recordDailyLogin: ActorMethod<[string], bigint>;
   // Admin
   clearAllData: ActorMethod<[], { ok: null }>;
 }

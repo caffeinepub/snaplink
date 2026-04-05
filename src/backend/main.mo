@@ -96,16 +96,21 @@ actor SnapLink {
   stable var stableMessageCounter : Nat = 0;
   stable var stableRequestCounter : Nat = 0;
 
-  // New feature stable state
+  // Feature stable state
   stable var stableStories : [(Text, Story)] = [];
-  stable var stableReactions : [(Text, [Reaction])] = []; // messageId -> [Reaction]
+  stable var stableReactions : [(Text, [Reaction])] = [];
   stable var stableGroups : [(Text, GroupInfo)] = [];
   stable var stableGroupMessages : [(Text, GroupMessage)] = [];
-  stable var stableStreaks : [(Text, StreakEntry)] = []; // "user1:user2" -> StreakEntry
-  stable var stableSnapScores : [(Text, Nat)] = []; // username -> score
+  stable var stableStreaks : [(Text, StreakEntry)] = [];
+  stable var stableSnapScores : [(Text, Nat)] = [];
   stable var stableStoryCounter : Nat = 0;
   stable var stableGroupCounter : Nat = 0;
   stable var stableGroupMsgCounter : Nat = 0;
+
+  // New v42 stable state
+  stable var stableGhostMode : [(Text, Bool)] = [];
+  stable var stableReadReceiptsEnabled : [(Text, Bool)] = [];
+  stable var stableLastLoginDay : [(Text, Int)] = []; // username -> UTC day number
 
   // ========== STATE (loaded from stable on init) ==========
 
@@ -116,7 +121,7 @@ actor SnapLink {
   var messageCounter : Nat = stableMessageCounter;
   var requestCounter : Nat = stableRequestCounter;
 
-  // New feature state
+  // Feature state
   var stories : Map.Map<Text, Story> = Map.fromIter(stableStories.vals());
   var reactions : Map.Map<Text, [Reaction]> = Map.fromIter(stableReactions.vals());
   var groups : Map.Map<Text, GroupInfo> = Map.fromIter(stableGroups.vals());
@@ -126,6 +131,11 @@ actor SnapLink {
   var storyCounter : Nat = stableStoryCounter;
   var groupCounter : Nat = stableGroupCounter;
   var groupMsgCounter : Nat = stableGroupMsgCounter;
+
+  // New v42 state
+  var ghostMode : Map.Map<Text, Bool> = Map.fromIter(stableGhostMode.vals());
+  var readReceiptsEnabled : Map.Map<Text, Bool> = Map.fromIter(stableReadReceiptsEnabled.vals());
+  var lastLoginDay : Map.Map<Text, Int> = Map.fromIter(stableLastLoginDay.vals());
 
   // ========== SYSTEM HOOKS ==========
 
@@ -176,6 +186,20 @@ actor SnapLink {
     stableStoryCounter := storyCounter;
     stableGroupCounter := groupCounter;
     stableGroupMsgCounter := groupMsgCounter;
+
+    // v42
+    stableGhostMode := [];
+    for ((k, v) in ghostMode.entries()) {
+      stableGhostMode := stableGhostMode.concat([(k, v)]);
+    };
+    stableReadReceiptsEnabled := [];
+    for ((k, v) in readReceiptsEnabled.entries()) {
+      stableReadReceiptsEnabled := stableReadReceiptsEnabled.concat([(k, v)]);
+    };
+    stableLastLoginDay := [];
+    for ((k, v) in lastLoginDay.entries()) {
+      stableLastLoginDay := stableLastLoginDay.concat([(k, v)]);
+    };
   };
 
   system func postupgrade() {
@@ -195,6 +219,11 @@ actor SnapLink {
     storyCounter := stableStoryCounter;
     groupCounter := stableGroupCounter;
     groupMsgCounter := stableGroupMsgCounter;
+
+    // v42
+    ghostMode := Map.fromIter(stableGhostMode.vals());
+    readReceiptsEnabled := Map.fromIter(stableReadReceiptsEnabled.vals());
+    lastLoginDay := Map.fromIter(stableLastLoginDay.vals());
   };
 
   // ========== HELPERS ==========
@@ -258,6 +287,13 @@ actor SnapLink {
     if (u1 < u2) u1 # ":" # u2 else u2 # ":" # u1;
   };
 
+  // Returns UTC day number from nanosecond timestamp
+  func utcDayFromNanos(nanos : Int) : Int {
+    let secsPerDay : Int = 86_400;
+    let nanosPerSec : Int = 1_000_000_000;
+    nanos / (secsPerDay * nanosPerSec);
+  };
+
   // ========== ADMIN ==========
 
   public func clearAllData() : async { #ok } {
@@ -291,6 +327,12 @@ actor SnapLink {
     stableStoryCounter := 0;
     stableGroupCounter := 0;
     stableGroupMsgCounter := 0;
+    ghostMode := Map.empty<Text, Bool>();
+    readReceiptsEnabled := Map.empty<Text, Bool>();
+    lastLoginDay := Map.empty<Text, Int>();
+    stableGhostMode := [];
+    stableReadReceiptsEnabled := [];
+    stableLastLoginDay := [];
     #ok;
   };
 
@@ -955,6 +997,68 @@ actor SnapLink {
       case (?s) s;
       case (null) 0;
     };
+  };
+
+  // ========== GHOST MODE (v42) ==========
+
+  public shared ({ caller }) func setGhostMode(callerUsername : Text, enabled : Bool) : async { #ok; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return #err("Not logged in");
+      case (?u) u;
+    };
+    ghostMode.add(username, enabled);
+    #ok;
+  };
+
+  public query func isGhostMode(username : Text) : async Bool {
+    switch (ghostMode.get(username)) {
+      case (?v) v;
+      case (null) false;
+    };
+  };
+
+  // ========== READ RECEIPTS TOGGLE (v42) ==========
+
+  public shared ({ caller }) func setReadReceiptsEnabled(callerUsername : Text, enabled : Bool) : async { #ok; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return #err("Not logged in");
+      case (?u) u;
+    };
+    readReceiptsEnabled.add(username, enabled);
+    #ok;
+  };
+
+  public query func getReadReceiptsEnabled(username : Text) : async Bool {
+    switch (readReceiptsEnabled.get(username)) {
+      case (?v) v;
+      case (null) true; // default is enabled
+    };
+  };
+
+  // ========== DAILY LOGIN BONUS (v42) ==========
+
+  // Awards +2 snap score points once per UTC day. Returns points awarded (0 if already done today).
+  public shared ({ caller }) func recordDailyLogin(callerUsername : Text) : async Nat {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return 0;
+      case (?u) u;
+    };
+    let now = Time.now();
+    let todayDay = utcDayFromNanos(now);
+    switch (lastLoginDay.get(username)) {
+      case (?lastDay) {
+        if (lastDay == todayDay) return 0; // already awarded today
+      };
+      case (null) {};
+    };
+    // Award bonus
+    lastLoginDay.add(username, todayDay);
+    let currentScore = switch (snapScores.get(username)) {
+      case (?s) s;
+      case (null) 0;
+    };
+    snapScores.add(username, currentScore + 2);
+    2;
   };
 
   // ========== BLOB STORAGE (inlined from blob-storage/Mixin) ==========

@@ -108,6 +108,17 @@ export interface backendInterface {
   // ── Snap Score ─────────────────────────────────────────────────────────────────
   getSnapScore(username: string): Promise<bigint>;
 
+  // ── Daily Login Bonus ──────────────────────────────────────────────────────────
+  recordDailyLogin(callerUsername: string): Promise<bigint>;
+
+  // ── Ghost Mode ─────────────────────────────────────────────────────────────────
+  setGhostMode(callerUsername: string, enabled: boolean): Promise<{ ok: null } | { err: string }>;
+  isGhostMode(username: string): Promise<boolean>;
+
+  // ── Read Receipts Toggle ───────────────────────────────────────────────────────
+  setReadReceiptsEnabled(callerUsername: string, enabled: boolean): Promise<{ ok: null } | { err: string }>;
+  getReadReceiptsEnabled(username: string): Promise<boolean>;
+
   // ── Admin ────────────────────────────────────────────────────────────────────────────
   /** Wipe ALL data from the canister (users, connections, messages). Irreversible. */
   clearAllData(): Promise<{ ok: null }>;

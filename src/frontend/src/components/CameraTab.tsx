@@ -1252,6 +1252,56 @@ function SendToSheet({
   );
 }
 
+// ─── Daily Snap Challenge ───────────────────────────────────────────────────────────────────
+
+const SNAP_PROMPTS = [
+  "\uD83D\uDCF8 Snap something that made you smile today",
+  "\uD83C\uDF05 Catch the morning light",
+  "\uD83C\uDFA8 Find something colorful",
+  "\uD83E\uDD1D Snap a moment with a friend",
+  "\uD83C\uDF55 Your current meal or snack",
+  "\uD83C\uDF3F A plant or nature nearby",
+  "\uD83D\uDCAA Your workout or movement today",
+  "\uD83C\uDFB5 What are you listening to?",
+  "\uD83D\uDC3E An animal you spotted",
+  "\u2728 Something that inspired you",
+  "\uD83C\uDF19 The night sky or evening view",
+  "\uD83D\uDCDA What you're reading or learning",
+  "\u2615 Your morning drink",
+  "\uD83C\uDFD9\uFE0F Your city or neighborhood",
+  "\uD83C\uDFAD Strike a pose!",
+  "\uD83C\uDF0A Water anywhere \u2014 puddle, river, sea",
+  "\uD83D\uDD0D A tiny detail most people miss",
+  "\uD83C\uDF08 Something with a rainbow of colors",
+  "\uD83C\uDF89 Celebrate something small today",
+  "\uD83C\uDF38 A flower or bloom",
+  "\uD83C\uDFE0 Your favorite spot at home",
+  "\uD83D\uDE97 Your commute or journey",
+  "\uD83D\uDC9F Your shoes today",
+  "\uD83C\uDF24\uFE0F The sky right now",
+  "\uD83C\uDFAE What you're playing",
+  "\uD83D\uDED2 Something new you bought",
+  "\uD83C\uDF0D Something that reminds you of travel",
+  "\uD83D\uDCA1 A creative idea in action",
+  "\uD83C\uDF42 A seasonal moment",
+  "\uD83C\uDF81 Something that surprised you",
+  "\uD83D\uDC40 Your current view",
+  "\uD83D\uDD25 Something you're passionate about",
+];
+
+function getDailyPrompt(): string {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  const diff = now.getTime() - start.getTime();
+  const dayOfYear = Math.floor(diff / 86_400_000);
+  return SNAP_PROMPTS[dayOfYear % SNAP_PROMPTS.length];
+}
+
+function getDailyDismissKey(): string {
+  const d = new Date();
+  return `snapChallengeDismissed_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export function CameraTab() {
   const { currentUser, setActiveTab, setSelectedConversation } = useApp();
   const { identity } = useInternetIdentity();
@@ -1290,6 +1340,25 @@ export function CameraTab() {
 
   // Placed items (stickers + text)
   const [placedItems, setPlacedItems] = useState<PlacedItem[]>([]);
+
+  // Daily Snap Challenge
+  const [challengeDismissed, setChallengeDismissed] = useState(() => {
+    try {
+      return sessionStorage.getItem(getDailyDismissKey()) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const dailyPrompt = getDailyPrompt();
+
+  const handleDismissChallenge = () => {
+    setChallengeDismissed(true);
+    try {
+      sessionStorage.setItem(getDailyDismissKey(), "1");
+    } catch {
+      // ignore
+    }
+  };
 
   // Preview container ref for canvas sizing
   const previewContainerRef = useRef<HTMLDivElement>(null);
@@ -1760,6 +1829,33 @@ export function CameraTab() {
                   />
                 )}
               </AnimatePresence>
+
+              {/* Daily Snap Challenge Banner */}
+              {!challengeDismissed && (
+                <div
+                  className="absolute top-14 left-3 right-3 z-10 flex items-center gap-2 px-3 py-2 rounded-xl"
+                  style={{
+                    background: "rgba(10,14,30,0.88)",
+                    backdropFilter: "blur(8px)",
+                    borderLeft: "3px solid #00CFFF",
+                    border: "1px solid rgba(0,207,255,0.3)",
+                    borderLeftWidth: 3,
+                  }}
+                >
+                  <p className="flex-1 text-white text-xs font-medium leading-snug">
+                    {dailyPrompt}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleDismissChallenge}
+                    className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
+                    style={{ background: "rgba(255,255,255,0.12)" }}
+                    aria-label="Dismiss challenge"
+                  >
+                    <X size={11} color="#B0B0CC" />
+                  </button>
+                </div>
+              )}
 
               <div
                 className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 pt-14 pb-4"
