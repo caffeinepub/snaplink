@@ -8,12 +8,12 @@ import Storage "blob-storage/Storage";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Array "mo:core/Array";
-import Migration "migration";
+
 import MixinStorage "blob-storage/Mixin";
 import AccessControl "authorization/access-control";
 import MixinAuthorization "authorization/MixinAuthorization";
 
-(with migration = Migration.run)
+
 actor {
   // ========== MIXINS ==========
   include MixinStorage();
@@ -431,9 +431,6 @@ actor {
   };
 
   public shared ({ caller }) func updateProfile(callerUsername : Text, displayName : Text, bio : Text) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can save profiles");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -468,9 +465,6 @@ actor {
   // ========== CONNECTIONS ==========
 
   public shared ({ caller }) func sendConnectionRequest(callerUsername : Text, toUsername : Text) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can send connection requests");
-    };
     let fromUsername = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -517,9 +511,6 @@ actor {
   };
 
   public shared ({ caller }) func respondToRequest(callerUsername : Text, requestId : Text, accept : Bool) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can respond to requests");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -535,9 +526,6 @@ actor {
   };
 
   public shared ({ caller }) func getSentRequests(callerUsername : Text) : async [ConnectionRequest] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view sent requests");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
@@ -557,9 +545,6 @@ actor {
   };
 
   public shared ({ caller }) func getPendingRequests(callerUsername : Text) : async [ConnectionRequest] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view pending requests");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
@@ -584,9 +569,6 @@ actor {
   };
 
   public shared ({ caller }) func getFriends(callerUsername : Text) : async [UserProfile] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view friends");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
@@ -622,9 +604,6 @@ actor {
   // ========== MESSAGING ==========
 
   public shared ({ caller }) func sendMessage(callerUsername : Text, toUsername : Text, content : Text) : async { #ok : Message; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can send messages");
-    };
     let fromUsername = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -649,9 +628,6 @@ actor {
   };
 
   public shared ({ caller }) func sendSnap(callerUsername : Text, toUsername : Text, blobId : Text, isEphemeral : Bool, saveToChat : Bool) : async { #ok : Message; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can send snaps");
-    };
     let fromUsername = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -695,9 +671,6 @@ actor {
   };
 
   public shared ({ caller }) func getMessages(callerUsername : Text, withUsername : Text, since : Int) : async [Message] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view messages");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
@@ -721,9 +694,6 @@ actor {
   };
 
   public shared ({ caller }) func markMessageRead(callerUsername : Text, messageId : Text) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can mark messages as read");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -739,9 +709,6 @@ actor {
   };
 
   public shared ({ caller }) func viewSnap(callerUsername : Text, messageId : Text) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view snaps");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -757,9 +724,6 @@ actor {
   };
 
   public shared ({ caller }) func getUnreadCount(callerUsername : Text) : async Nat {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view unread count");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return 0;
       case (?u) u;
@@ -774,9 +738,6 @@ actor {
   };
 
   public shared ({ caller }) func getPendingRequestCount(callerUsername : Text) : async Nat {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view pending request count");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return 0;
       case (?u) u;
@@ -805,9 +766,6 @@ actor {
     lastMessageTimestamp : Int;
     unreadCount : Nat;
   }] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view conversations");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
@@ -850,9 +808,6 @@ actor {
   // ========== SNAP STORIES ==========
 
   public shared ({ caller }) func postStory(callerUsername : Text, blobId : Text, caption : Text) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can post stories");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) { return #err("Not logged in") };
       case (?u) { u };
@@ -882,9 +837,6 @@ actor {
   };
 
   public shared ({ caller }) func getFriendStories(callerUsername : Text) : async [Story] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view stories");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
@@ -906,9 +858,6 @@ actor {
   };
 
   public shared ({ caller }) func deleteStory(callerUsername : Text, storyId : Text) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can delete stories");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -928,9 +877,6 @@ actor {
   // ========== REACTIONS ==========
 
   public shared ({ caller }) func addReaction(callerUsername : Text, messageId : Text, emoji : Text) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can add reactions");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -968,9 +914,6 @@ actor {
   // ========== GROUP CHATS ==========
 
   public shared ({ caller }) func createGroup(callerUsername : Text, groupName : Text, memberUsernames : [Text]) : async { #ok : GroupInfo; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can create groups");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -996,9 +939,6 @@ actor {
   };
 
   public shared ({ caller }) func getGroups(callerUsername : Text) : async [GroupInfo] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view groups");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
@@ -1015,9 +955,6 @@ actor {
   };
 
   public shared ({ caller }) func sendGroupMessage(callerUsername : Text, groupId : Text, content : Text) : async { #ok : GroupMessage; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can send group messages");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -1047,9 +984,6 @@ actor {
   };
 
   public shared ({ caller }) func getGroupMessages(callerUsername : Text, groupId : Text, since : Int) : async [GroupMessage] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view group messages");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return [];
       case (?u) u;
@@ -1103,9 +1037,6 @@ actor {
   // ========== GHOST MODE ==========
 
   public shared ({ caller }) func setGhostMode(callerUsername : Text, enabled : Bool) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can set ghost mode");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -1124,9 +1055,6 @@ actor {
   // ========== READ RECEIPTS TOGGLE ==========
 
   public shared ({ caller }) func setReadReceiptsEnabled(callerUsername : Text, enabled : Bool) : async { #ok; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can set read receipts");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -1145,9 +1073,6 @@ actor {
   // ========== DAILY LOGIN BONUS ==========
 
   public shared ({ caller }) func recordDailyLogin(callerUsername : Text) : async Nat {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can record daily login");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) return 0;
       case (?u) u;
@@ -1172,9 +1097,6 @@ actor {
   // ========== LEADERBOARD ==========
 
   public query ({ caller }) func getLeaderboard(callerUsername : Text) : async [LeaderboardEntry] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view leaderboard");
-    };
     let username = switch (usersByUsername.get(callerUsername)) {
       case (null) { return [] };
       case (_) { callerUsername };
@@ -1248,9 +1170,6 @@ actor {
   };
 
   public query ({ caller }) func getAchievements(callerUsername : Text) : async [Badge] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view achievements");
-    };
     let username = switch (usersByUsername.get(callerUsername)) {
       case (null) { return [] };
       case (_) { callerUsername };
@@ -1324,9 +1243,6 @@ actor {
   // ========== TIME CAPSULE SNAPS ==========
 
   public shared ({ caller }) func sendCapsuleSnap(callerUsername : Text, toUsername : Text, blobId : Text, unlockAt : Int) : async { #ok : CapsuleMessage; #err : Text } {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can send capsule snaps");
-    };
     let senderUsername = switch (resolveUsername(callerUsername, caller)) {
       case (null) return #err("Not logged in");
       case (?u) u;
@@ -1350,9 +1266,6 @@ actor {
   };
 
   public shared ({ caller }) func getCapsuleMessages(callerUsername : Text, withUsername : Text) : async [CapsuleMessage] {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view capsule messages");
-    };
     let username = switch (resolveUsername(callerUsername, caller)) {
       case (null) { return [] };
       case (?u) u;
@@ -1375,9 +1288,6 @@ actor {
   };
 
   public query ({ caller }) func getCapsuleStatus(callerUsername : Text, messageId : Text) : async ?CapsuleMessage {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can view capsule status");
-    };
     switch (capsuleMessages.get(messageId)) {
       case (?msg) {
         switch (resolveUsername(callerUsername, caller)) {
@@ -1429,9 +1339,6 @@ actor {
   // ========== REQUIRED USER PROFILE FUNCTIONS ==========
 
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can access profiles");
-    };
     switch (getPrincipalUsername(caller)) {
       case (?username) {
         usersByUsername.get(username);
@@ -1457,9 +1364,6 @@ actor {
   };
 
   public shared ({ caller }) func saveCallerUserProfile(profile : UserProfile) : async () {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can save profiles");
-    };
     switch (getPrincipalUsername(caller)) {
       case (?username) {
         usersByUsername.add(username, profile);
