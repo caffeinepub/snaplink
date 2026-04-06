@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   backendGetFriends,
+  backendSendCapsuleSnap,
   backendSendSnap,
   backendUploadSnapMedia,
 } from "../backendStore";
@@ -1023,6 +1024,12 @@ function SendToSheet({
   sent,
   sendError,
   uploadProgress,
+  capsuleEnabled,
+  onCapsuleToggle,
+  capsulePreset,
+  onCapsulePreset,
+  capsuleDate,
+  onCapsuleDate,
 }: {
   friends: User[];
   selectedFriends: string[];
@@ -1033,7 +1040,49 @@ function SendToSheet({
   sent: boolean;
   sendError?: string | null;
   uploadProgress?: number;
+  capsuleEnabled?: boolean;
+  onCapsuleToggle?: (val: boolean) => void;
+  capsulePreset?: "tomorrow" | "week" | "month" | "custom";
+  onCapsulePreset?: (val: "tomorrow" | "week" | "month" | "custom") => void;
+  capsuleDate?: string;
+  onCapsuleDate?: (val: string) => void;
 }) {
+  // Calculate tomorrow as min date for custom picker
+  const tomorrowStr = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split("T")[0];
+  })();
+
+  const capsuleDateLabel = (() => {
+    if (!capsuleEnabled) return "";
+    switch (capsulePreset) {
+      case "tomorrow": {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        return d.toLocaleDateString([], { month: "short", day: "numeric" });
+      }
+      case "week": {
+        const d = new Date();
+        d.setDate(d.getDate() + 7);
+        return d.toLocaleDateString([], { month: "short", day: "numeric" });
+      }
+      case "month": {
+        const d = new Date();
+        d.setMonth(d.getMonth() + 1);
+        return d.toLocaleDateString([], { month: "short", day: "numeric" });
+      }
+      case "custom":
+        return capsuleDate
+          ? new Date(capsuleDate).toLocaleDateString([], {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : "Pick a date";
+    }
+  })();
+
   return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
@@ -1172,6 +1221,105 @@ function SendToSheet({
             </p>
           </div>
         )}
+
+        {/* Time Capsule Toggle */}
+        <div
+          className="px-4 py-3"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-base">⏰</span>
+              <div>
+                <p className="text-white text-sm font-semibold">Time Capsule</p>
+                <p className="text-[#B0B0CC] text-xs">
+                  {capsuleEnabled && capsuleDateLabel
+                    ? `Unlocks on ${capsuleDateLabel}`
+                    : "Snap unlocks on a future date"}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onCapsuleToggle?.(!capsuleEnabled)}
+              className="w-12 h-6 rounded-full transition-all duration-300 relative flex-shrink-0"
+              style={{
+                background: capsuleEnabled
+                  ? "linear-gradient(135deg, #BD00FF, #7700CC)"
+                  : "#2A3048",
+              }}
+              aria-label="Toggle time capsule"
+              data-ocid="camera.toggle"
+            >
+              <div
+                className="absolute w-5 h-5 rounded-full top-0.5 transition-all duration-300"
+                style={{
+                  left: capsuleEnabled ? "calc(100% - 22px)" : "2px",
+                  background: "white",
+                }}
+              />
+            </button>
+          </div>
+
+          {capsuleEnabled && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+              style={{ overflow: "hidden" }}
+            >
+              <div className="flex gap-2 mt-2 flex-wrap">
+                {(["tomorrow", "week", "month", "custom"] as const).map(
+                  (preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => onCapsulePreset?.(preset)}
+                      className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                      style={{
+                        background:
+                          capsulePreset === preset
+                            ? "rgba(189,0,255,0.25)"
+                            : "rgba(255,255,255,0.06)",
+                        border:
+                          capsulePreset === preset
+                            ? "1px solid rgba(189,0,255,0.6)"
+                            : "1px solid rgba(255,255,255,0.1)",
+                        color: capsulePreset === preset ? "#BD00FF" : "#B0B0CC",
+                      }}
+                      data-ocid="camera.toggle"
+                    >
+                      {preset === "tomorrow"
+                        ? "Tomorrow"
+                        : preset === "week"
+                          ? "1 Week"
+                          : preset === "month"
+                            ? "1 Month"
+                            : "Custom"}
+                    </button>
+                  ),
+                )}
+              </div>
+              {capsulePreset === "custom" && (
+                <input
+                  type="date"
+                  min={tomorrowStr}
+                  value={capsuleDate}
+                  onChange={(e) => onCapsuleDate?.(e.target.value)}
+                  className="w-full mt-2 px-3 py-2 rounded-xl text-sm outline-none"
+                  style={{
+                    background: "rgba(189,0,255,0.1)",
+                    border: "1px solid rgba(189,0,255,0.3)",
+                    color: "white",
+                    colorScheme: "dark",
+                  }}
+                  data-ocid="camera.input"
+                />
+              )}
+            </motion.div>
+          )}
+        </div>
 
         <div className="px-4 py-4" style={{ borderTop: "1px solid #2A3048" }}>
           <AnimatePresence mode="wait">
@@ -1322,6 +1470,12 @@ export function CameraTab() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [showSendSheet, setShowSendSheet] = useState(false);
   const [showAiAssistant, setShowAiAssistant] = useState(false);
+  // Time Capsule
+  const [capsuleEnabled, setCapsuleEnabled] = useState(false);
+  const [capsuleDate, setCapsuleDate] = useState<string>("");
+  const [capsulePreset, setCapsulePreset] = useState<
+    "tomorrow" | "week" | "month" | "custom"
+  >("tomorrow");
   const [snapCaption, setSnapCaption] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStartTime, setRecordingStartTime] = useState<number | null>(
@@ -1612,18 +1766,30 @@ export function CameraTab() {
       void snapContent;
 
       const encodedBlobId = isVideo ? `v:${blobId}` : `p:${blobId}`;
-      const sendResults = await Promise.all(
-        recipientFriends.map((friend) =>
-          backendSendSnap(
-            currentUser.username,
-            friend,
-            encodedBlobId,
-            isEphemeral,
-            !isEphemeral,
-            identity ?? undefined,
-          ),
-        ),
-      );
+      const sendResults = capsuleEnabled
+        ? await Promise.all(
+            recipientFriends.map((friend) =>
+              backendSendCapsuleSnap(
+                currentUser.username,
+                friend,
+                encodedBlobId,
+                getCapsuleUnlockMs(),
+                identity ?? undefined,
+              ),
+            ),
+          )
+        : await Promise.all(
+            recipientFriends.map((friend) =>
+              backendSendSnap(
+                currentUser.username,
+                friend,
+                encodedBlobId,
+                isEphemeral,
+                !isEphemeral,
+                identity ?? undefined,
+              ),
+            ),
+          );
       const anyError = sendResults.find((r) => "err" in r) as
         | { err: string }
         | undefined;
@@ -1652,6 +1818,9 @@ export function CameraTab() {
         setDrawStrokes([]);
         setPlacedItems([]);
         setPreviewTab("filters");
+        setCapsuleEnabled(false);
+        setCapsulePreset("tomorrow");
+        setCapsuleDate("");
         startCamera();
         if (recipientFriends.length === 1) {
           setSelectedConversation(recipientFriends[0]);
@@ -1663,6 +1832,24 @@ export function CameraTab() {
     } catch (e) {
       setSendError(`Failed to send: ${String(e)}`);
       setSending(false);
+    }
+  };
+
+  const getCapsuleUnlockMs = (): number => {
+    const now = Date.now();
+    switch (capsulePreset) {
+      case "tomorrow":
+        return now + 24 * 60 * 60 * 1000;
+      case "week":
+        return now + 7 * 24 * 60 * 60 * 1000;
+      case "month":
+        return now + 30 * 24 * 60 * 60 * 1000;
+      case "custom": {
+        const d = new Date(capsuleDate);
+        return Number.isNaN(d.getTime())
+          ? now + 24 * 60 * 60 * 1000
+          : d.getTime();
+      }
     }
   };
 
@@ -1680,6 +1867,9 @@ export function CameraTab() {
     setDrawStrokes([]);
     setPlacedItems([]);
     setPreviewTab("filters");
+    setCapsuleEnabled(false);
+    setCapsulePreset("tomorrow");
+    setCapsuleDate("");
     startCamera();
   };
 
@@ -2366,6 +2556,12 @@ export function CameraTab() {
             sent={sent}
             sendError={sendError}
             uploadProgress={uploadProgress}
+            capsuleEnabled={capsuleEnabled}
+            onCapsuleToggle={setCapsuleEnabled}
+            capsulePreset={capsulePreset}
+            onCapsulePreset={setCapsulePreset}
+            capsuleDate={capsuleDate}
+            onCapsuleDate={setCapsuleDate}
           />
         )}
       </AnimatePresence>

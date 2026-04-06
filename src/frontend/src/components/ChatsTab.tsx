@@ -3,6 +3,7 @@ import {
   Camera,
   Check,
   CheckCheck,
+  Clock,
   Image,
   MapPin,
   MessageCircle,
@@ -25,6 +26,7 @@ import {
   backendAddReaction,
   backendCreateGroup,
   backendDeleteStory,
+  backendGetCapsuleMessages,
   backendGetConversations,
   backendGetFriendStories,
   backendGetFriends,
@@ -42,7 +44,13 @@ import {
   backendUploadSnapMedia,
   backendViewSnap,
 } from "../backendStore";
-import type { GroupInfo, GroupMessage, Reaction, Story } from "../backendStore";
+import type {
+  CapsuleMessage,
+  GroupInfo,
+  GroupMessage,
+  Reaction,
+  Story,
+} from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getUserProfileCache } from "../store";
@@ -103,6 +111,19 @@ function formatDisappearLabel(seconds: number, timestamp: number): string {
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
   return `${hours}h`;
+}
+
+/** Format countdown for capsule unlock */
+function formatCapsuleCountdown(unlockAt: number): string {
+  const diff = unlockAt - Date.now();
+  if (diff <= 0) return "Unlocked!";
+  const totalSecs = Math.floor(diff / 1000);
+  const days = Math.floor(totalSecs / 86400);
+  const hours = Math.floor((totalSecs % 86400) / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  if (days > 0) return `Unlocks in ${days}d ${hours}h`;
+  if (hours > 0) return `Unlocks in ${hours}h ${mins}m`;
+  return `Unlocks in ${mins}m`;
 }
 
 /** Map a raw backend message object to the frontend Message type. */
@@ -2111,6 +2132,9 @@ function ChatView({
   // Message recall
   const [recallMenuMsgId, setRecallMenuMsgId] = useState<string | null>(null);
   const _recallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Time Capsule snaps
+  const [capsuleMessages, setCapsuleMessages] = useState<CapsuleMessage[]>([]);
+  const prevCapsuleUnlockRef = useRef<Record<string, boolean>>({});
 
   const refresh = useCallback(async () => {
     if (!currentUser) return;
@@ -2141,6 +2165,25 @@ function ChatView({
       setReactions(
         Object.fromEntries(reactionResults.filter(([, r]) => r.length > 0)),
       );
+      // Fetch capsule messages
+      const capsules = await backendGetCapsuleMessages(
+        currentUser.username,
+        username,
+        identity ?? undefined,
+      ).catch(() => [] as CapsuleMessage[]);
+
+      // Check for newly-unlocked capsules to fire toast
+      const prevUnlocks = prevCapsuleUnlockRef.current;
+      for (const cap of capsules) {
+        if (cap.isUnlocked && !prevUnlocks[cap.id]) {
+          toast.success("\u23f0 A Time Capsule just unlocked!");
+        }
+      }
+      const newUnlockMap: Record<string, boolean> = {};
+      for (const cap of capsules) newUnlockMap[cap.id] = cap.isUnlocked;
+      prevCapsuleUnlockRef.current = newUnlockMap;
+
+      setCapsuleMessages(capsules);
     } catch {
       // keep existing messages
     }
@@ -2664,6 +2707,102 @@ function ChatView({
             </motion.div>
           );
         })}
+        {/* Time Capsule messages */}
+        {capsuleMessages.map((cap, i) => {
+          const isSent = cap.senderId === currentUser?.username;
+          const isUnlocked = cap.isUnlocked || Date.now() >= cap.unlockAt;
+          const countdown = formatCapsuleCountdown(cap.unlockAt);
+          return (
+            <motion.div
+              key={`cap-${cap.id}`}
+              initial={{ opacity: 0, y: 10, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.25 }}
+              className={`flex ${isSent ? "justify-end" : "justify-start"}`}
+              data-ocid={`chats.item.${i + 100}`}
+            >
+              <div style={{ maxWidth: "75%" }}>
+                {isUnlocked ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!currentUser) return;
+                      const { hash } = decodeBlobId(cap.blobId);
+                      const url = await backendGetSnapUrl(hash);
+                      if (url) {
+                        const fakeMsg: Message & { snapBlobId?: string } = {
+                          id: cap.id,
+                          senderId: cap.senderId,
+                          receiverId: cap.receiverId,
+                          content: "\ud83d\udcf8 Time Capsule Snap",
+                          timestamp: cap.timestamp,
+                          isRead: true,
+                          isSnap: true,
+                          isEphemeral: false,
+                          snapViewed: false,
+                          snapBlobId: cap.blobId,
+                        };
+                        setViewingSnap(fakeMsg);
+                        setSnapMediaUrls((prev) => ({
+                          ...prev,
+                          [cap.id]: url,
+                        }));
+                      }
+                    }}
+                    className="flex items-center gap-2 px-4 py-3 rounded-2xl"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, rgba(189,0,255,0.2), rgba(40,20,80,0.8))",
+                      border: "1.5px solid rgba(189,0,255,0.6)",
+                      boxShadow: "0 0 18px rgba(189,0,255,0.3)",
+                    }}
+                  >
+                    <span className="text-lg">\u23f0</span>
+                    <div className="text-left">
+                      <p className="text-white font-semibold text-sm">
+                        Time Capsule
+                      </p>
+                      <p className="text-xs" style={{ color: "#BD00FF" }}>
+                        \ud83d\udcf8 Tap to open snap
+                      </p>
+                    </div>
+                  </button>
+                ) : (
+                  <div
+                    className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, rgba(20,10,40,0.9), rgba(30,15,60,0.8))",
+                      border: "1.5px solid rgba(189,0,255,0.35)",
+                      boxShadow: "0 0 12px rgba(189,0,255,0.15)",
+                    }}
+                  >
+                    <Clock size={20} color="#BD00FF" />
+                    <div>
+                      <p className="text-white font-semibold text-sm">
+                        Time Capsule
+                      </p>
+                      <p className="text-xs" style={{ color: "#B0B0CC" }}>
+                        {countdown}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <div
+                  className={`flex items-center gap-1 mt-1 ${isSent ? "justify-end" : "justify-start"}`}
+                >
+                  <span className="text-[10px]" style={{ color: "#B0B0CC" }}>
+                    {formatTime(cap.timestamp)}
+                  </span>
+                  <span className="text-[10px]" style={{ color: "#BD00FF" }}>
+                    \u23f0 Capsule
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
+
         <div ref={bottomRef} />
       </div>
 

@@ -903,3 +903,127 @@ export async function backendSeedDemoAccounts(): Promise<void> {
     }
   }
 }
+
+// ─── Leaderboard ──────────────────────────────────────────────────────────────
+
+export interface LeaderboardEntry {
+  username: string;
+  displayName: string;
+  rank: number;
+  snapScore: number;
+}
+
+export async function backendGetLeaderboard(
+  callerUsername: string,
+  identity?: Identity,
+): Promise<LeaderboardEntry[]> {
+  try {
+    const a = await actor(identity);
+    const raw = await a.getLeaderboard(callerUsername);
+    return raw.map((e: any) => ({
+      username: String(e.username),
+      displayName: String(e.displayName),
+      rank: Number(e.rank),
+      snapScore: Number(e.snapScore),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ─── Achievements ─────────────────────────────────────────────────────────────
+
+export interface AchievementBadge {
+  id: string;
+  name: string;
+  description: string;
+  unlocked: boolean;
+}
+
+export async function backendGetAchievements(
+  callerUsername: string,
+  identity?: Identity,
+): Promise<AchievementBadge[]> {
+  try {
+    const a = await actor(identity);
+    const raw = await a.getAchievements(callerUsername);
+    return raw.map((b: any) => ({
+      id: String(b.id),
+      name: String(b.name),
+      description: String(b.description),
+      unlocked: Boolean(b.unlocked),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ─── Time Capsule ─────────────────────────────────────────────────────────────
+
+export interface CapsuleMessage {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  blobId: string;
+  unlockAt: number; // ms
+  isUnlocked: boolean;
+  timestamp: number; // ms
+}
+
+export async function backendSendCapsuleSnap(
+  callerUsername: string,
+  toUsername: string,
+  blobId: string,
+  unlockAtMs: number,
+  identity?: Identity,
+): Promise<{ ok: CapsuleMessage } | { err: string }> {
+  try {
+    const a = await actor(identity);
+    const unlockAtNs = BigInt(Math.floor(unlockAtMs)) * BigInt(1_000_000);
+    const result = await a.sendCapsuleSnap(
+      callerUsername,
+      toUsername,
+      blobId,
+      unlockAtNs,
+    );
+    if ("ok" in result) {
+      const m = result.ok;
+      return {
+        ok: {
+          id: String(m.id),
+          senderId: String(m.senderId),
+          receiverId: String(m.receiverId),
+          blobId: String(m.blobId),
+          unlockAt: Number(m.unlockAt) / 1_000_000,
+          isUnlocked: Boolean(m.isUnlocked),
+          timestamp: Number(m.timestamp) / 1_000_000,
+        },
+      };
+    }
+    return { err: result.err };
+  } catch (e) {
+    return { err: sanitizeError(e) };
+  }
+}
+
+export async function backendGetCapsuleMessages(
+  callerUsername: string,
+  withUsername: string,
+  identity?: Identity,
+): Promise<CapsuleMessage[]> {
+  try {
+    const a = await actor(identity);
+    const raw = await a.getCapsuleMessages(callerUsername, withUsername);
+    return raw.map((m: any) => ({
+      id: String(m.id),
+      senderId: String(m.senderId),
+      receiverId: String(m.receiverId),
+      blobId: String(m.blobId),
+      unlockAt: Number(m.unlockAt) / 1_000_000,
+      isUnlocked: Boolean(m.isUnlocked),
+      timestamp: Number(m.timestamp) / 1_000_000,
+    }));
+  } catch {
+    return [];
+  }
+}

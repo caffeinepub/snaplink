@@ -3,10 +3,13 @@ import { Switch } from "@/components/ui/switch";
 import {
   Camera,
   Check,
+  ChevronDown,
+  ChevronUp,
   Edit3,
   Eye,
   EyeOff,
   Ghost,
+  Lock,
   LogOut,
   MessageCircle,
   Star,
@@ -19,9 +22,13 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  type AchievementBadge,
+  type LeaderboardEntry,
   backendClearAllData,
+  backendGetAchievements,
   backendGetConversations,
   backendGetFriends,
+  backendGetLeaderboard,
   backendGetReadReceiptsEnabled,
   backendGetSnapScore,
   backendIsGhostMode,
@@ -47,6 +54,397 @@ const MOODS = [
   { emoji: "🎉", label: "Excited" },
   { emoji: "💪", label: "Focused" },
 ];
+
+// Badge metadata: emoji icon and display name for each badge ID
+const BADGE_META: Record<string, { emoji: string; label: string }> = {
+  first_snap_sent: { emoji: "📸", label: "First Snap" },
+  first_friend_added: { emoji: "👥", label: "First Friend" },
+  streak_7: { emoji: "🔥", label: "7-Day Streak" },
+  streak_30: { emoji: "🔥", label: "30-Day Streak" },
+  friends_10: { emoji: "💫", label: "10 Friends" },
+  snaps_50: { emoji: "⚡", label: "50 Snaps" },
+  snaps_100: { emoji: "💯", label: "100 Snaps" },
+  story_posted: { emoji: "📖", label: "Story Posted" },
+  group_created: { emoji: "👥", label: "Group Created" },
+  voice_sent: { emoji: "🎙️", label: "Voice Message" },
+  location_shared: { emoji: "📍", label: "Location Shared" },
+  score_500: { emoji: "🏆", label: "Score 500" },
+};
+
+// ─── LeaderboardPanel ─────────────────────────────────────────────────────────
+
+function LeaderboardPanel({
+  currentUsername,
+  onClose,
+}: {
+  currentUsername: string;
+  onClose: () => void;
+}) {
+  const { identity } = useInternetIdentity();
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    backendGetLeaderboard(currentUsername, identity ?? undefined)
+      .then((data) => {
+        setEntries(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [currentUsername, identity]);
+
+  const top3 = entries.filter((e) => e.rank <= 3);
+  const rest = entries.filter((e) => e.rank > 3 && e.rank <= 10);
+  const myEntry = entries.find((e) => e.username === currentUsername);
+  const myRankInList = entries.some(
+    (e) => e.username === currentUsername && e.rank <= 10,
+  );
+
+  const podiumOrder = [1, 0, 2]; // silver(2nd), gold(1st), bronze(3rd) visual order
+  const podiumColors = ["#C0C0C0", "#FFD700", "#CD7F32"];
+  const podiumHeights = ["h-20", "h-28", "h-16"];
+  const podiumEmojis = ["🥈", "🥇", "🥉"];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      style={{ background: "rgba(0,0,0,0.7)" }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.38 }}
+        className="rounded-t-3xl px-5 pt-5 pb-10 flex flex-col"
+        style={{
+          background: "rgba(20,24,40,0.98)",
+          backdropFilter: "blur(24px)",
+          border: "1px solid rgba(255,215,0,0.15)",
+          borderBottom: "none",
+          maxHeight: "88vh",
+          overflowY: "auto",
+        }}
+        onClick={(e) => e.stopPropagation()}
+        data-ocid="profile.panel"
+      >
+        {/* Handle */}
+        <div className="flex justify-center mb-4">
+          <div
+            className="w-10 h-1 rounded-full"
+            style={{ background: "rgba(255,255,255,0.15)" }}
+          />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <Trophy size={20} color="#FFD700" />
+            <h2 className="text-white font-bold text-lg">Snap Leaderboard</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(255,255,255,0.08)" }}
+            data-ocid="profile.close_button"
+          >
+            <X size={16} color="#B0B0CC" />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex flex-col gap-3 py-4">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-14 rounded-2xl animate-pulse"
+                style={{ background: "rgba(255,255,255,0.05)" }}
+                data-ocid="profile.loading_state"
+              />
+            ))}
+          </div>
+        ) : entries.length === 0 ? (
+          <div
+            className="flex flex-col items-center justify-center py-12 gap-3"
+            data-ocid="profile.empty_state"
+          >
+            <Trophy size={40} color="#2A3048" />
+            <p className="text-[#B0B0CC] text-sm text-center">
+              No leaderboard data yet. Start snapping to climb the ranks!
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Podium */}
+            {top3.length >= 2 && (
+              <div className="flex items-end justify-center gap-2 mb-6 px-2">
+                {podiumOrder.map((idx) => {
+                  const entry = top3[idx];
+                  if (!entry) return null;
+                  const isMe = entry.username === currentUsername;
+                  return (
+                    <motion.div
+                      key={entry.username}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.1 }}
+                      className="flex flex-col items-center gap-1 flex-1"
+                    >
+                      <span
+                        className="text-xs font-bold"
+                        style={{ color: podiumColors[idx] }}
+                      >
+                        {entry.displayName.split(" ")[0]}
+                      </span>
+                      <span className="text-xs" style={{ color: "#B0B0CC" }}>
+                        {entry.snapScore.toLocaleString()} pts
+                      </span>
+                      <div
+                        className={`w-full ${podiumHeights[idx]} rounded-t-xl flex flex-col items-center justify-center gap-1`}
+                        style={{
+                          background: isMe
+                            ? `linear-gradient(180deg, ${podiumColors[idx]}44, ${podiumColors[idx]}22)`
+                            : `linear-gradient(180deg, ${podiumColors[idx]}33, ${podiumColors[idx]}11)`,
+                          border: isMe
+                            ? `2px solid ${podiumColors[idx]}`
+                            : `1px solid ${podiumColors[idx]}55`,
+                          boxShadow: isMe
+                            ? `0 0 16px ${podiumColors[idx]}44`
+                            : "none",
+                        }}
+                      >
+                        <span className="text-xl">{podiumEmojis[idx]}</span>
+                        <span
+                          className="text-xs font-bold"
+                          style={{ color: podiumColors[idx] }}
+                        >
+                          #{entry.rank}
+                        </span>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Ranked list #4-10 */}
+            {rest.length > 0 && (
+              <div className="flex flex-col gap-2 mb-3">
+                {rest.map((entry, i) => {
+                  const isMe = entry.username === currentUsername;
+                  return (
+                    <motion.div
+                      key={entry.username}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                      className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                      style={{
+                        background: isMe
+                          ? "rgba(0,207,255,0.1)"
+                          : "rgba(255,255,255,0.04)",
+                        border: isMe
+                          ? "1.5px solid rgba(0,207,255,0.4)"
+                          : "1px solid rgba(255,255,255,0.07)",
+                        boxShadow: isMe
+                          ? "0 0 12px rgba(0,207,255,0.2)"
+                          : "none",
+                      }}
+                      data-ocid={`profile.item.${i + 1}`}
+                    >
+                      <span
+                        className="text-sm font-bold w-7 text-center flex-shrink-0"
+                        style={{ color: isMe ? "#00CFFF" : "#B0B0CC" }}
+                      >
+                        #{entry.rank}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p
+                          className="font-semibold text-sm truncate"
+                          style={{ color: isMe ? "#00CFFF" : "white" }}
+                        >
+                          {entry.displayName}
+                          {isMe && " (You)"}
+                        </p>
+                        <p className="text-[#B0B0CC] text-xs">
+                          @{entry.username}
+                        </p>
+                      </div>
+                      <span
+                        className="text-xs font-bold px-2 py-1 rounded-full"
+                        style={{
+                          background: isMe
+                            ? "rgba(0,207,255,0.15)"
+                            : "rgba(255,255,255,0.06)",
+                          color: isMe ? "#00CFFF" : "#B0B0CC",
+                        }}
+                      >
+                        {entry.snapScore.toLocaleString()}
+                      </span>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* My rank (if outside top 10) */}
+            {myEntry && !myRankInList && (
+              <>
+                <div
+                  className="flex items-center gap-2 my-2"
+                  style={{ color: "#B0B0CC" }}
+                >
+                  <div
+                    className="flex-1 h-px"
+                    style={{ background: "rgba(255,255,255,0.08)" }}
+                  />
+                  <span className="text-xs">Your rank</span>
+                  <div
+                    className="flex-1 h-px"
+                    style={{ background: "rgba(255,255,255,0.08)" }}
+                  />
+                </div>
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                  style={{
+                    background: "rgba(0,207,255,0.1)",
+                    border: "1.5px solid rgba(0,207,255,0.45)",
+                    boxShadow: "0 0 16px rgba(0,207,255,0.2)",
+                  }}
+                  data-ocid="profile.card"
+                >
+                  <span
+                    className="text-sm font-bold w-7 text-center flex-shrink-0"
+                    style={{ color: "#00CFFF" }}
+                  >
+                    #{myEntry.rank}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-white truncate">
+                      {myEntry.displayName}{" "}
+                      <span style={{ color: "#00CFFF" }}>(You)</span>
+                    </p>
+                    <p className="text-[#B0B0CC] text-xs">
+                      @{myEntry.username}
+                    </p>
+                  </div>
+                  <span
+                    className="text-xs font-bold px-2 py-1 rounded-full"
+                    style={{
+                      background: "rgba(0,207,255,0.2)",
+                      color: "#00CFFF",
+                    }}
+                  >
+                    {myEntry.snapScore.toLocaleString()}
+                  </span>
+                </motion.div>
+              </>
+            )}
+          </>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── AchievementGrid ──────────────────────────────────────────────────────────
+
+function AchievementGrid({
+  badges,
+  loading,
+}: {
+  badges: AchievementBadge[];
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="grid grid-cols-4 gap-3">
+        {["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"].map(
+          (key) => (
+            <div
+              key={key}
+              className="flex flex-col items-center gap-1"
+              data-ocid="profile.loading_state"
+            >
+              <div
+                className="w-14 h-14 rounded-2xl animate-pulse"
+                style={{ background: "rgba(255,255,255,0.06)" }}
+              />
+              <div
+                className="h-2 w-10 rounded animate-pulse"
+                style={{ background: "rgba(255,255,255,0.04)" }}
+              />
+            </div>
+          ),
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-4 gap-3">
+      {badges.map((badge, i) => {
+        const meta = BADGE_META[badge.id] ?? {
+          emoji: "⭐",
+          label: badge.name,
+        };
+        return (
+          <motion.div
+            key={badge.id}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: i * 0.04 }}
+            className="flex flex-col items-center gap-1"
+            data-ocid={`profile.item.${i + 1}`}
+          >
+            <div
+              className="w-14 h-14 rounded-2xl flex items-center justify-center relative"
+              style={{
+                background: badge.unlocked
+                  ? "linear-gradient(135deg, rgba(0,207,255,0.15), rgba(189,0,255,0.1))"
+                  : "rgba(255,255,255,0.04)",
+                border: badge.unlocked
+                  ? "1.5px solid rgba(0,207,255,0.45)"
+                  : "1px solid rgba(255,255,255,0.08)",
+                boxShadow: badge.unlocked
+                  ? "0 0 14px rgba(0,207,255,0.25)"
+                  : "none",
+                opacity: badge.unlocked ? 1 : 0.45,
+                filter: badge.unlocked ? "none" : "grayscale(1)",
+              }}
+              title={badge.description}
+            >
+              <span className="text-2xl">{meta.emoji}</span>
+              {!badge.unlocked && (
+                <div
+                  className="absolute inset-0 flex items-center justify-center rounded-2xl"
+                  style={{ background: "rgba(0,0,0,0.25)" }}
+                >
+                  <Lock size={12} color="#B0B0CC" />
+                </div>
+              )}
+            </div>
+            <span
+              className="text-[9px] font-medium text-center leading-tight"
+              style={{
+                color: badge.unlocked ? "#B0E0FF" : "#B0B0CC",
+                maxWidth: 56,
+              }}
+            >
+              {meta.label}
+            </span>
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+}
 
 export function ProfileTab() {
   const { currentUser, logout, refreshUser } = useApp();
@@ -74,12 +472,19 @@ export function ProfileTab() {
   const [clearing, setClearing] = useState(false);
   const [clearError, setClearError] = useState<string | null>(null);
 
+  // Leaderboard
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  // Achievements
+  const [badges, setBadges] = useState<AchievementBadge[]>([]);
+  const [badgesLoading, setBadgesLoading] = useState(true);
+  const [showBadges, setShowBadges] = useState(true);
+
   useEffect(() => {
     if (currentUser) {
       setDisplayName(currentUser.displayName);
       setBio(currentUser.bio);
       setAvatarUrl(currentUser.avatarUrl);
-      // Load mood from localStorage
       const savedMood = localStorage.getItem(
         `moodStatus_${currentUser.username}`,
       );
@@ -87,7 +492,7 @@ export function ProfileTab() {
     }
   }, [currentUser]);
 
-  // Load friends, conversations, snap score, and privacy settings from backend
+  // Load friends, conversations, snap score from backend
   useEffect(() => {
     if (!currentUser) return;
     const refresh = async () => {
@@ -131,6 +536,46 @@ export function ProfileTab() {
     };
     refresh();
     const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
+  }, [currentUser, identity]);
+
+  // Load achievement badges on mount and refresh every 30s
+  useEffect(() => {
+    if (!currentUser) return;
+    const loadBadges = async () => {
+      const newBadges = await backendGetAchievements(
+        currentUser.username,
+        identity ?? undefined,
+      ).catch(() => [] as AchievementBadge[]);
+
+      // Check for newly unlocked badges vs last known state
+      const storageKey = `snaplink_badges_${currentUser.username}`;
+      const prevRaw = localStorage.getItem(storageKey);
+      if (prevRaw) {
+        try {
+          const prevMap: Record<string, boolean> = JSON.parse(prevRaw);
+          for (const b of newBadges) {
+            if (b.unlocked && !prevMap[b.id]) {
+              const meta = BADGE_META[b.id];
+              toast.success(
+                `🏆 Badge Unlocked: ${meta ? meta.label : b.name}!`,
+              );
+            }
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+      // Save current state
+      const newMap: Record<string, boolean> = {};
+      for (const b of newBadges) newMap[b.id] = b.unlocked;
+      localStorage.setItem(storageKey, JSON.stringify(newMap));
+
+      setBadges(newBadges);
+      setBadgesLoading(false);
+    };
+    loadBadges();
+    const interval = setInterval(loadBadges, 30_000);
     return () => clearInterval(interval);
   }, [currentUser, identity]);
 
@@ -253,6 +698,7 @@ export function ProfileTab() {
 
   const cache = getUserProfileCache();
   const cachedAvatar = cache[currentUser.username]?.avatarUrl ?? avatarUrl;
+  const unlockedCount = badges.filter((b) => b.unlocked).length;
 
   return (
     <div
@@ -528,10 +974,73 @@ export function ProfileTab() {
       </div>
 
       {/* Snap Score breakdown */}
-      <div className="mx-5 mb-5">
+      <div className="mx-5 mb-4">
         <p className="text-[#B0B0CC] text-[10px] text-center mt-1.5">
           🏅 +10 per snap • 🔥 +5 streak • 📅 +2 daily login
         </p>
+      </div>
+
+      {/* ── Snap Leaderboard button ── */}
+      <div className="mx-5 mb-5">
+        <PressableButton
+          onClick={() => setShowLeaderboard(true)}
+          className="w-full py-3.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(255,215,0,0.12), rgba(255,170,0,0.08))",
+            border: "1.5px solid rgba(255,215,0,0.3)",
+            color: "#FFD700",
+            boxShadow: "0 0 16px rgba(255,215,0,0.1)",
+          }}
+          data-ocid="profile.open_modal_button"
+        >
+          <Trophy size={16} color="#FFD700" />
+          View Snap Leaderboard
+        </PressableButton>
+      </div>
+
+      {/* ── Achievement Badges ── */}
+      <div className="mx-5 mb-5">
+        <button
+          type="button"
+          onClick={() => setShowBadges((s) => !s)}
+          className="w-full flex items-center justify-between mb-3"
+          data-ocid="profile.toggle"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🏆</span>
+            <p className="text-white font-bold text-base">Achievements</p>
+            {!badgesLoading && (
+              <span
+                className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                style={{
+                  background: "rgba(0,207,255,0.15)",
+                  color: "#00CFFF",
+                }}
+              >
+                {unlockedCount}/{badges.length}
+              </span>
+            )}
+          </div>
+          {showBadges ? (
+            <ChevronUp size={16} color="#B0B0CC" />
+          ) : (
+            <ChevronDown size={16} color="#B0B0CC" />
+          )}
+        </button>
+        <AnimatePresence>
+          {showBadges && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.22, ease: "easeInOut" }}
+              style={{ overflow: "hidden" }}
+            >
+              <AchievementGrid badges={badges} loading={badgesLoading} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Mood Status */}
@@ -941,6 +1450,16 @@ export function ProfileTab() {
           </a>
         </p>
       </div>
+
+      {/* Leaderboard Panel */}
+      <AnimatePresence>
+        {showLeaderboard && (
+          <LeaderboardPanel
+            currentUsername={currentUser.username}
+            onClose={() => setShowLeaderboard(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
