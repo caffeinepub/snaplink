@@ -39,6 +39,15 @@ import {
 import type { User } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
 
+const MOODS = [
+  { emoji: "😊", label: "Happy" },
+  { emoji: "😎", label: "Chill" },
+  { emoji: "🔥", label: "Busy" },
+  { emoji: "😴", label: "Tired" },
+  { emoji: "🎉", label: "Excited" },
+  { emoji: "💪", label: "Focused" },
+];
+
 export function ProfileTab() {
   const { currentUser, logout, refreshUser } = useApp();
   const { identity, clear: iiClear } = useInternetIdentity();
@@ -52,6 +61,7 @@ export function ProfileTab() {
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [bestFriends, setBestFriends] = useState<User[]>([]);
+  const [selectedMood, setSelectedMood] = useState<string | null>(null);
 
   // Privacy settings
   const [ghostMode, setGhostMode] = useState(false);
@@ -69,6 +79,11 @@ export function ProfileTab() {
       setDisplayName(currentUser.displayName);
       setBio(currentUser.bio);
       setAvatarUrl(currentUser.avatarUrl);
+      // Load mood from localStorage
+      const savedMood = localStorage.getItem(
+        `moodStatus_${currentUser.username}`,
+      );
+      if (savedMood) setSelectedMood(savedMood);
     }
   }, [currentUser]);
 
@@ -92,7 +107,6 @@ export function ProfileTab() {
       setConversationCount(convs.length);
       setSnapScore(score);
 
-      // Compute best friends: sort conversations by timestamp, take top 3 friends
       const friendUsernames = new Set(f.map((fr: User) => fr.username));
       const friendConvs = convs
         .filter((c: any) => friendUsernames.has(String(c.username)))
@@ -168,6 +182,17 @@ export function ProfileTab() {
       identity ?? undefined,
     ).catch(() => {});
     setReceiptLoading(false);
+  };
+
+  const handleMoodSelect = (emoji: string) => {
+    if (!currentUser) return;
+    const newMood = selectedMood === emoji ? null : emoji;
+    setSelectedMood(newMood);
+    if (newMood) {
+      localStorage.setItem(`moodStatus_${currentUser.username}`, newMood);
+    } else {
+      localStorage.removeItem(`moodStatus_${currentUser.username}`);
+    }
   };
 
   const handleSave = () => {
@@ -309,6 +334,7 @@ export function ProfileTab() {
                   name={currentUser.displayName}
                   size={90}
                   avatarUrl={cachedAvatar}
+                  moodEmoji={selectedMood ?? undefined}
                 />
               </div>
             </div>
@@ -413,6 +439,9 @@ export function ProfileTab() {
             >
               <h2 className="text-2xl font-bold text-white">
                 {currentUser.displayName}
+                {selectedMood && (
+                  <span className="ml-2 text-2xl">{selectedMood}</span>
+                )}
               </h2>
               <p className="text-[#B0B0CC] text-sm mt-0.5">
                 @{currentUser.username}
@@ -431,30 +460,68 @@ export function ProfileTab() {
         </AnimatePresence>
       </div>
 
-      {/* Stats - 3 columns with Snap Score */}
+      {/* Stats - gradient tint cards */}
       <div className="mx-5 grid grid-cols-3 gap-3 mb-2">
-        <div className="card-surface p-4 flex flex-col items-center gap-1">
+        <div
+          className="card-surface p-4 flex flex-col items-center gap-1"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(0,207,255,0.08), rgba(0,207,255,0.03))",
+            border: "1px solid rgba(0,207,255,0.15)",
+          }}
+        >
           <div className="flex items-center gap-1.5">
             <Users size={18} color="#00CFFF" />
-            <span className="text-2xl font-bold text-white">
+            <motion.span
+              key={friends.length}
+              initial={{ scale: 1.3, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="text-2xl font-bold text-white"
+            >
               {friends.length}
-            </span>
+            </motion.span>
           </div>
           <p className="text-[#B0B0CC] text-xs">Friends</p>
         </div>
-        <div className="card-surface p-4 flex flex-col items-center gap-1">
+        <div
+          className="card-surface p-4 flex flex-col items-center gap-1"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(189,0,255,0.08), rgba(189,0,255,0.03))",
+            border: "1px solid rgba(189,0,255,0.15)",
+          }}
+        >
           <div className="flex items-center gap-1.5">
             <MessageCircle size={18} color="#BD00FF" />
-            <span className="text-2xl font-bold text-white">
+            <motion.span
+              key={conversationCount}
+              initial={{ scale: 1.3, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="text-2xl font-bold text-white"
+            >
               {conversationCount}
-            </span>
+            </motion.span>
           </div>
           <p className="text-[#B0B0CC] text-xs">Chats</p>
         </div>
-        <div className="card-surface p-4 flex flex-col items-center gap-1">
+        <div
+          className="card-surface p-4 flex flex-col items-center gap-1"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(255,170,0,0.08), rgba(255,170,0,0.03))",
+            border: "1px solid rgba(255,170,0,0.15)",
+          }}
+        >
           <div className="flex items-center gap-1.5">
             <Star size={18} color="#FFAA00" />
-            <span className="text-2xl font-bold text-white">{snapScore}</span>
+            <motion.span
+              key={snapScore}
+              initial={{ scale: 1.3, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="text-2xl font-bold text-white"
+            >
+              {snapScore}
+            </motion.span>
           </div>
           <p className="text-[#B0B0CC] text-xs">Score</p>
         </div>
@@ -463,8 +530,59 @@ export function ProfileTab() {
       {/* Snap Score breakdown */}
       <div className="mx-5 mb-5">
         <p className="text-[#B0B0CC] text-[10px] text-center mt-1.5">
-          🏅 +10 per snap  •  🔥 +5 streak  •  📅 +2 daily login
+          🏅 +10 per snap • 🔥 +5 streak • 📅 +2 daily login
         </p>
+      </div>
+
+      {/* Mood Status */}
+      <div className="mx-5 mb-5">
+        <p className="text-[#B0B0CC] text-xs font-medium uppercase tracking-widest mb-3">
+          Mood Status
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          {MOODS.map((mood) => {
+            const isSelected = selectedMood === mood.emoji;
+            return (
+              <motion.button
+                key={mood.emoji}
+                type="button"
+                onClick={() => handleMoodSelect(mood.emoji)}
+                whileTap={{ scale: 0.92 }}
+                className="flex flex-col items-center gap-1 py-3 rounded-2xl text-center"
+                style={{
+                  background: isSelected
+                    ? "linear-gradient(135deg, rgba(0,207,255,0.15), rgba(189,0,255,0.1))"
+                    : "rgba(26,31,51,0.6)",
+                  border: isSelected
+                    ? "1.5px solid rgba(0,207,255,0.5)"
+                    : "1px solid rgba(255,255,255,0.06)",
+                  boxShadow: isSelected
+                    ? "0 0 12px rgba(0,207,255,0.2)"
+                    : "none",
+                }}
+                data-ocid="profile.toggle"
+              >
+                <span className="text-xl">{mood.emoji}</span>
+                <span
+                  className="text-[10px] font-medium"
+                  style={{ color: isSelected ? "#00CFFF" : "#B0B0CC" }}
+                >
+                  {mood.label}
+                </span>
+              </motion.button>
+            );
+          })}
+        </div>
+        {selectedMood && (
+          <motion.p
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center text-xs mt-2"
+            style={{ color: "#00CFFF" }}
+          >
+            {selectedMood} Mood active — visible to your friends
+          </motion.p>
+        )}
       </div>
 
       {/* Best Friends */}

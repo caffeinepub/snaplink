@@ -834,6 +834,25 @@ actor SnapLink {
     });
   };
 
+  // Delete a story (only the author can delete their own story)
+  public shared ({ caller }) func deleteStory(callerUsername : Text, storyId : Text) : async { #ok; #err : Text } {
+    let username = switch (resolveUsername(callerUsername, caller)) {
+      case (null) return #err("Not logged in");
+      case (?u) u;
+    };
+    switch (stories.get(storyId)) {
+      case (null) return #err("Story not found");
+      case (?story) {
+        if (story.authorUsername != username) {
+          return #err("Not your story");
+        };
+        stories := stories.filter(func(k, v) { k != storyId });
+        #ok;
+      };
+    };
+  };
+
+
   // ========== REACTIONS ==========
 
   public shared ({ caller }) func addReaction(callerUsername : Text, messageId : Text, emoji : Text) : async { #ok; #err : Text } {

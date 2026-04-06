@@ -8,10 +8,12 @@ import {
   MessageCircle,
   MessageSquarePlus,
   Mic,
+  Palette,
   Plus,
   Search,
   Send,
   Timer,
+  Trash2,
   UserPlus,
   Users,
   X,
@@ -22,6 +24,7 @@ import { toast } from "sonner";
 import {
   backendAddReaction,
   backendCreateGroup,
+  backendDeleteStory,
   backendGetConversations,
   backendGetFriendStories,
   backendGetFriends,
@@ -42,6 +45,7 @@ import {
 import type { GroupInfo, GroupMessage, Reaction, Story } from "../backendStore";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { getUserProfileCache } from "../store";
 import type { ConversationSummary, Message, User } from "../types";
 import { PressableButton, UserAvatar } from "./Shared";
 
@@ -125,16 +129,155 @@ function mapBackendMessage(msg: any): Message & { snapBlobId?: string } {
   };
 }
 
+// ─── Chat Themes ──────────────────────────────────────────────────────────────
+
+const CHAT_THEMES = [
+  {
+    id: "blue",
+    label: "Ocean",
+    accent: "#00CFFF",
+    gradient: "linear-gradient(135deg, #0099BB, #004466)",
+  },
+  {
+    id: "purple",
+    label: "Neon",
+    accent: "#BD00FF",
+    gradient: "linear-gradient(135deg, #8800CC, #440066)",
+  },
+  {
+    id: "orange",
+    label: "Sunset",
+    accent: "#FF6B35",
+    gradient: "linear-gradient(135deg, #CC4400, #882200)",
+  },
+  {
+    id: "mint",
+    label: "Mint",
+    accent: "#00D4A0",
+    gradient: "linear-gradient(135deg, #00AA80, #004433)",
+  },
+  {
+    id: "rose",
+    label: "Rose",
+    accent: "#FF4D8F",
+    gradient: "linear-gradient(135deg, #CC2266, #880044)",
+  },
+  {
+    id: "gold",
+    label: "Gold",
+    accent: "#FFAA00",
+    gradient: "linear-gradient(135deg, #CC8800, #664400)",
+  },
+];
+
+function getChatTheme(conversationUsername: string) {
+  const stored = localStorage.getItem(`chatTheme_${conversationUsername}`);
+  return CHAT_THEMES.find((t) => t.id === stored) ?? CHAT_THEMES[0];
+}
+
+function ChatThemePicker({
+  conversationUsername,
+  onClose,
+}: {
+  conversationUsername: string;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState(() => {
+    const stored = localStorage.getItem(`chatTheme_${conversationUsername}`);
+    return stored ?? "blue";
+  });
+
+  const handleSelect = (id: string) => {
+    setSelected(id);
+    localStorage.setItem(`chatTheme_${conversationUsername}`, id);
+    onClose();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      style={{ background: "rgba(0,0,0,0.6)" }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.32 }}
+        className="rounded-t-3xl px-5 pt-5 pb-10"
+        style={{
+          background: "rgba(26,31,51,0.97)",
+          backdropFilter: "blur(20px)",
+          border: "1px solid rgba(255,255,255,0.08)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-center mb-4">
+          <div
+            className="w-10 h-1 rounded-full"
+            style={{ background: "rgba(255,255,255,0.15)" }}
+          />
+        </div>
+        <p className="text-white font-bold text-base mb-4">Chat Theme</p>
+        <div className="grid grid-cols-3 gap-3">
+          {CHAT_THEMES.map((theme) => (
+            <button
+              key={theme.id}
+              type="button"
+              onClick={() => handleSelect(theme.id)}
+              className="flex flex-col items-center gap-2 py-3 rounded-2xl"
+              style={{
+                background:
+                  selected === theme.id
+                    ? "rgba(255,255,255,0.06)"
+                    : "rgba(255,255,255,0.02)",
+                border:
+                  selected === theme.id
+                    ? `1.5px solid ${theme.accent}`
+                    : "1px solid rgba(255,255,255,0.06)",
+                boxShadow:
+                  selected === theme.id ? `0 0 12px ${theme.accent}44` : "none",
+              }}
+            >
+              <div
+                className="w-8 h-8 rounded-full"
+                style={{ background: theme.gradient }}
+              />
+              <span
+                className="text-xs font-medium"
+                style={{
+                  color: selected === theme.id ? theme.accent : "#B0B0CC",
+                }}
+              >
+                {theme.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Story Viewer ─────────────────────────────────────────────────────────────
 
 function StoryViewer({
   story,
   mediaUrl,
   onClose,
+  isOwn,
+  onDelete,
+  currentUsername: _currentUsername,
 }: {
   story: Story;
   mediaUrl: string | null;
   onClose: () => void;
+  isOwn?: boolean;
+  onDelete?: () => void;
+  currentUsername?: string;
 }) {
   const timeLeft = formatTimeLeft(story.expiresAt);
 
@@ -179,6 +322,20 @@ function StoryViewer({
           </p>
           <p className="text-white/60 text-xs">{timeLeft}</p>
         </div>
+        {isOwn && onDelete && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="w-9 h-9 rounded-full flex items-center justify-center mr-2"
+            style={{ background: "rgba(255,50,50,0.2)", color: "#FF5555" }}
+            data-ocid="stories.delete_button"
+          >
+            <Trash2 size={16} color="#FF5555" />
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -235,6 +392,7 @@ function StoriesRow({
   const [stories, setStories] = useState<Story[]>([]);
   const [selectedStory, setSelectedStory] = useState<Story | null>(null);
   const [storyMediaUrl, setStoryMediaUrl] = useState<string | null>(null);
+  const [isOwnStory, setIsOwnStory] = useState(false);
 
   const loadStories = useCallback(async () => {
     const s = await backendGetFriendStories(
@@ -252,6 +410,7 @@ function StoriesRow({
 
   const handleOpenStory = async (story: Story) => {
     setSelectedStory(story);
+    setIsOwnStory(story.authorUsername === currentUsername);
     if (story.blobId) {
       const { hash } = decodeBlobId(story.blobId);
       const url = await backendGetSnapUrl(hash);
@@ -260,6 +419,26 @@ function StoriesRow({
       setStoryMediaUrl(null);
     }
   };
+
+  const handleDelete = async () => {
+    if (!selectedStory) return;
+    const result = await backendDeleteStory(
+      currentUsername,
+      selectedStory.id,
+      identity ?? undefined,
+    );
+    if ("err" in result) {
+      toast.error("Could not delete story");
+    } else {
+      toast.success("Story deleted");
+    }
+    setSelectedStory(null);
+    setStoryMediaUrl(null);
+    await loadStories();
+  };
+
+  const profileCache = getUserProfileCache();
+  const myAvatarUrl = profileCache[currentUsername]?.avatarUrl;
 
   return (
     <>
@@ -272,14 +451,44 @@ function StoriesRow({
           <button
             type="button"
             onClick={onAddStory}
-            className="relative w-14 h-14 rounded-full flex items-center justify-center"
-            style={{
-              background: "linear-gradient(135deg, #1A1F33, #1A1F33)",
-              border: "2px dashed rgba(0,207,255,0.5)",
-            }}
+            className="relative w-14 h-14 rounded-full p-0.5"
+            style={
+              myAvatarUrl
+                ? {
+                    background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                    boxShadow: "0 0 12px rgba(0,207,255,0.4)",
+                  }
+                : {
+                    background: "linear-gradient(135deg, #1A1F33, #1A1F33)",
+                    border: "2px dashed rgba(0,207,255,0.5)",
+                  }
+            }
             data-ocid="stories.primary_button"
           >
-            <Plus size={20} color="#00CFFF" />
+            {myAvatarUrl ? (
+              <div
+                className="w-full h-full rounded-full overflow-hidden flex items-center justify-center"
+                style={{ background: "#1A1F33" }}
+              >
+                <UserAvatar
+                  name={currentUsername}
+                  avatarUrl={myAvatarUrl}
+                  size={52}
+                />
+              </div>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <Plus size={20} color="#00CFFF" />
+              </div>
+            )}
+            {myAvatarUrl && (
+              <div
+                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center"
+                style={{ background: "#00CFFF" }}
+              >
+                <Plus size={10} color="#000" />
+              </div>
+            )}
           </button>
           <span
             className="text-[10px] text-[#B0B0CC]"
@@ -290,41 +499,50 @@ function StoriesRow({
         </div>
 
         {/* Friend stories */}
-        {stories.map((story) => (
-          <div
-            key={story.id}
-            className="flex flex-col items-center gap-1 flex-shrink-0"
-          >
-            <button
-              type="button"
-              onClick={() => handleOpenStory(story)}
-              className="relative w-14 h-14 rounded-full p-0.5"
-              style={{
-                background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
-                boxShadow: "0 0 12px rgba(0,207,255,0.4)",
-              }}
+        {stories.map((story) => {
+          const storyAvatarUrl = profileCache[story.authorUsername]?.avatarUrl;
+          return (
+            <div
+              key={story.id}
+              className="flex flex-col items-center gap-1 flex-shrink-0"
             >
-              <div
-                className="w-full h-full rounded-full overflow-hidden flex items-center justify-center"
-                style={{ background: "#1A1F33" }}
+              <button
+                type="button"
+                onClick={() => handleOpenStory(story)}
+                className="relative w-14 h-14 rounded-full p-0.5 story-ring-pulse"
+                style={{
+                  background: "linear-gradient(135deg, #00CFFF, #BD00FF)",
+                }}
               >
-                <UserAvatar name={story.authorDisplayName} size={52} />
-              </div>
-            </button>
-            <span
-              className="text-[10px] text-white font-medium"
-              style={{
-                maxWidth: 56,
-                textAlign: "center",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {story.authorDisplayName.split(" ")[0]}
-            </span>
-          </div>
-        ))}
+                <div
+                  className="w-full h-full rounded-full overflow-hidden flex items-center justify-center"
+                  style={{ background: "#1A1F33" }}
+                >
+                  <UserAvatar
+                    name={story.authorDisplayName}
+                    avatarUrl={storyAvatarUrl}
+                    size={52}
+                  />
+                </div>
+              </button>
+              <span
+                className="text-[10px] text-white font-medium"
+                style={{
+                  maxWidth: 56,
+                  textAlign: "center",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {story.authorDisplayName.split(" ")[0]}
+              </span>
+              <span className="text-[9px]" style={{ color: "#00CFFF66" }}>
+                {formatTimeLeft(story.expiresAt)}
+              </span>
+            </div>
+          );
+        })}
 
         {stories.length === 0 && (
           <div className="flex items-center">
@@ -343,6 +561,9 @@ function StoriesRow({
               setSelectedStory(null);
               setStoryMediaUrl(null);
             }}
+            isOwn={isOwnStory}
+            onDelete={handleDelete}
+            currentUsername={currentUsername}
           />
         )}
       </AnimatePresence>
@@ -1693,10 +1914,13 @@ function ConversationList({
               layout
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.25 }}
+              transition={{
+                ease: [0.16, 1, 0.3, 1],
+                duration: 0.25,
+                delay: i * 0.04,
+              }}
               onClick={() => onSelectGroup(group)}
-              className="flex items-center gap-3 px-5 py-3.5 cursor-pointer active:bg-[#1A1F33] transition-colors"
-              style={{ borderBottom: "1px solid rgba(42,48,72,0.5)" }}
+              className="flex items-center gap-3 px-4 py-3 mx-3 cursor-pointer chat-item-glass transition-colors"
               data-ocid={`chats.item.${i + 1}`}
             >
               <div
@@ -1733,19 +1957,33 @@ function ConversationList({
           {/* DM conversations */}
           {filteredConvs.map((conv, i) => {
             const streak = streaks[conv.username] ?? 0;
+            const isRecentlyActive =
+              conv.lastMessageTimestamp > 0 &&
+              Date.now() - conv.lastMessageTimestamp < 5 * 60 * 1000;
+            const friendMood =
+              localStorage.getItem(`moodStatus_${conv.username}`) ?? undefined;
             return (
               <motion.div
                 key={conv.username}
                 layout
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.25 }}
+                transition={{
+                  ease: [0.16, 1, 0.3, 1],
+                  duration: 0.25,
+                  delay: i * 0.04,
+                }}
                 onClick={() => onSelect(conv.username, conv.displayName)}
-                className="flex items-center gap-3 px-5 py-3.5 cursor-pointer active:bg-[#1A1F33] transition-colors"
-                style={{ borderBottom: "1px solid rgba(42,48,72,0.5)" }}
+                className="flex items-center gap-3 px-4 py-3 mx-3 cursor-pointer chat-item-glass transition-colors"
                 data-ocid={`chats.item.${filteredGroups.length + i + 1}`}
               >
-                <UserAvatar name={conv.displayName} size={50} />
+                <UserAvatar
+                  name={conv.displayName}
+                  size={50}
+                  avatarUrl={getUserProfileCache()[conv.username]?.avatarUrl}
+                  moodEmoji={friendMood}
+                  showOnlineDot={isRecentlyActive && !friendMood}
+                />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
@@ -1867,6 +2105,12 @@ function ChatView({
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Chat theme
+  const [chatTheme, setChatTheme] = useState(() => getChatTheme(username));
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  // Message recall
+  const [recallMenuMsgId, setRecallMenuMsgId] = useState<string | null>(null);
+  const _recallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(async () => {
     if (!currentUser) return;
@@ -2163,18 +2407,7 @@ function ChatView({
     setReactions((prev) => ({ ...prev, [messageId]: updated }));
   };
 
-  const handleLongPress = (msgId: string) => {
-    pressTimerRef.current = setTimeout(() => {
-      setReactionPickerMsgId(msgId);
-    }, 500);
-  };
-
-  const handlePressEnd = () => {
-    if (pressTimerRef.current) {
-      clearTimeout(pressTimerRef.current);
-      pressTimerRef.current = null;
-    }
-  };
+  // Long-press is now handled inline in the message loop
 
   const isVoiceMessage = (content: string) =>
     parseDisappearTag(content).cleanContent === "🎤 Voice message";
@@ -2184,7 +2417,15 @@ function ChatView({
       {/* Header */}
       <div
         className="flex items-center gap-3 px-4 pt-12 pb-4"
-        style={{ borderBottom: "1px solid #2A3048" }}
+        style={{
+          background: "rgba(26, 26, 46, 0.85)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          boxShadow: `0 1px 0 ${chatTheme.accent}26`,
+        }}
       >
         <button
           type="button"
@@ -2192,7 +2433,7 @@ function ChatView({
           className="p-2 -ml-2"
           data-ocid="chats.secondary_button"
         >
-          <ArrowLeft size={22} color="#00CFFF" />
+          <ArrowLeft size={22} color={chatTheme.accent} />
         </button>
         <UserAvatar name={displayName} size={38} />
         <div className="flex-1">
@@ -2213,11 +2454,20 @@ function ChatView({
         </div>
         <button
           type="button"
+          onClick={() => setShowThemePicker(true)}
+          className="p-2"
+          aria-label="Chat theme"
+          data-ocid="chats.toggle"
+        >
+          <Palette size={20} color={chatTheme.accent} />
+        </button>
+        <button
+          type="button"
           onClick={onCamera}
           className="p-2"
           data-ocid="chats.secondary_button"
         >
-          <Camera size={22} color="#00CFFF" />
+          <Camera size={22} color={chatTheme.accent} />
         </button>
       </div>
 
@@ -2225,7 +2475,10 @@ function ChatView({
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: dismissing picker on background click */}
       <div
         className="flex-1 overflow-y-auto scrollbar-hide px-4 py-4 flex flex-col gap-2"
-        onClick={() => setReactionPickerMsgId(null)}
+        onClick={() => {
+          setReactionPickerMsgId(null);
+          setRecallMenuMsgId(null);
+        }}
       >
         {visibleMessages.length === 0 && (
           <div className="flex-1 flex items-center justify-center">
@@ -2237,6 +2490,11 @@ function ChatView({
         {visibleMessages.map((msg, i) => {
           const isSent = msg.senderId === currentUser?.username;
           const msgReactions = reactions[msg.id] ?? [];
+          const isDeleted =
+            msg.content === "[DELETED]" ||
+            parseDisappearTag(msg.content).cleanContent === "[DELETED]";
+          const canRecall =
+            isSent && !isDeleted && Date.now() - msg.timestamp < 60_000;
           return (
             <motion.div
               key={msg.id}
@@ -2247,13 +2505,44 @@ function ChatView({
               data-ocid={`chats.item.${i + 1}`}
             >
               <div style={{ maxWidth: "75%", position: "relative" }}>
-                {/* Long-press target */}
+                {/* Long-press target for reaction + recall */}
                 <div
-                  onPointerDown={() => handleLongPress(msg.id)}
-                  onPointerUp={handlePressEnd}
-                  onPointerLeave={handlePressEnd}
+                  onPointerDown={(_e) => {
+                    pressTimerRef.current = setTimeout(() => {
+                      setReactionPickerMsgId(msg.id);
+                      if (isSent && canRecall) setRecallMenuMsgId(msg.id);
+                    }, 500);
+                  }}
+                  onPointerUp={() => {
+                    if (pressTimerRef.current) {
+                      clearTimeout(pressTimerRef.current);
+                      pressTimerRef.current = null;
+                    }
+                  }}
+                  onPointerLeave={() => {
+                    if (pressTimerRef.current) {
+                      clearTimeout(pressTimerRef.current);
+                      pressTimerRef.current = null;
+                    }
+                  }}
                 >
-                  {msg.isSnap ? (
+                  {isDeleted ? (
+                    <div
+                      className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl"
+                      style={{
+                        background: "rgba(42,48,72,0.4)",
+                        border: "1px solid rgba(255,255,255,0.05)",
+                      }}
+                    >
+                      <Trash2 size={12} color="#B0B0CC" />
+                      <p
+                        className="text-xs italic"
+                        style={{ color: "#B0B0CC" }}
+                      >
+                        Message deleted
+                      </p>
+                    </div>
+                  ) : msg.isSnap ? (
                     <SnapBubble
                       msg={msg}
                       isSent={isSent}
@@ -2264,28 +2553,75 @@ function ChatView({
                     <VoiceMessageBubble messageId={msg.id} />
                   ) : (
                     <div
-                      className={`px-4 py-2.5 ${
+                      className={isSent ? "" : "message-bubble-received"}
+                      style={
                         isSent
-                          ? "message-bubble-sent"
-                          : "message-bubble-received"
-                      }`}
+                          ? {
+                              background: chatTheme.gradient,
+                              borderRadius: "20px 20px 4px 20px",
+                              boxShadow: `0 2px 12px ${chatTheme.accent}44`,
+                              padding: "10px 14px",
+                            }
+                          : undefined
+                      }
                     >
-                      <p
-                        className="text-sm"
-                        style={{ color: isSent ? "white" : "#FFFFFF" }}
-                      >
+                      <p className="text-sm" style={{ color: "white" }}>
                         {parseDisappearTag(msg.content).cleanContent}
                       </p>
                     </div>
                   )}
                 </div>
 
+                {/* Recall context menu */}
+                <AnimatePresence>
+                  {recallMenuMsgId === msg.id && canRecall && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.85, y: 8 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.85, y: 8 }}
+                      className="absolute z-50 rounded-2xl px-1 py-1"
+                      style={{
+                        background: "#1A1F33",
+                        border: "1px solid #2A3048",
+                        bottom: "calc(100% + 8px)",
+                        right: 0,
+                        boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                        minWidth: 170,
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMessages((prev) =>
+                            prev.map((m) =>
+                              m.id === msg.id
+                                ? { ...m, content: "[DELETED]" }
+                                : m,
+                            ),
+                          );
+                          setRecallMenuMsgId(null);
+                          toast.success("Message deleted");
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium hover:bg-[#2A3048] transition-colors"
+                        style={{ color: "#FF6B6B" }}
+                      >
+                        <Trash2 size={14} />
+                        Delete for everyone
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {/* Reaction picker */}
                 <AnimatePresence>
                   {reactionPickerMsgId === msg.id && (
                     <ReactionPicker
                       onSelect={(emoji) => handleReaction(msg.id, emoji)}
-                      onClose={() => setReactionPickerMsgId(null)}
+                      onClose={() => {
+                        setReactionPickerMsgId(null);
+                        setRecallMenuMsgId(null);
+                      }}
                     />
                   )}
                 </AnimatePresence>
@@ -2522,6 +2858,19 @@ function ChatView({
             onSelect={(label) => handleShareLocation(label)}
             onClose={() => setShowLocationSheet(false)}
             sharing={sharingLocation}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Chat theme picker */}
+      <AnimatePresence>
+        {showThemePicker && (
+          <ChatThemePicker
+            conversationUsername={username}
+            onClose={() => {
+              setShowThemePicker(false);
+              setChatTheme(getChatTheme(username));
+            }}
           />
         )}
       </AnimatePresence>

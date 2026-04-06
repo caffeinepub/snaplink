@@ -632,6 +632,20 @@ export async function backendGetFriendStories(
   }
 }
 
+export async function backendDeleteStory(
+  callerUsername: string,
+  storyId: string,
+  identity?: Identity,
+): Promise<{ ok: null } | { err: string }> {
+  try {
+    const a = await actor(identity);
+    const result = await a.deleteStory(callerUsername, storyId);
+    if ("ok" in result) return { ok: null };
+    return { err: result.err };
+  } catch (e) {
+    return { err: sanitizeError(e) };
+  }
+}
 // ─── Reactions ───────────────────────────────────────────────────────────────
 
 export async function backendAddReaction(

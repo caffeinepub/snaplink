@@ -110,6 +110,7 @@ export interface _SERVICE {
   // Stories
   postStory: ActorMethod<[string, string, string], { ok: null } | { err: string }>;
   getFriendStories: ActorMethod<[string], Story[]>;
+  deleteStory: ActorMethod<[string, string], { ok: null } | { err: string }>;
   // Reactions
   addReaction: ActorMethod<[string, string, string], { ok: null } | { err: string }>;
   getReactions: ActorMethod<[string], Reaction[]>;

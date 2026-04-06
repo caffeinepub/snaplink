@@ -12,7 +12,7 @@ export function GradientLogo({ size = 80, className = "" }: GradientLogoProps) {
       style={{ width: size, height: size }}
     >
       <img
-        src="/assets/generated/snaplink-logo-transparent.dim_400x400.png"
+        src="/assets/generated/snaplink-logo-transparent.dim_200x200.png"
         alt="SnapLink logo"
         style={{ width: size, height: size, objectFit: "contain" }}
       />
