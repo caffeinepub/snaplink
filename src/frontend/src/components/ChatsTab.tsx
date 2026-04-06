@@ -514,14 +514,7 @@ function AddStorySheet({
 
 // ─── Reaction Picker ──────────────────────────────────────────────────────────
 
-const REACTION_EMOJIS = [
-  "\u2764\uFE0F",
-  "\uD83D\uDE02",
-  "\uD83D\uDE2E",
-  "\uD83D\uDE22",
-  "\uD83D\uDE21",
-  "\uD83D\uDC4D",
-];
+const REACTION_EMOJIS = ["❤️", "😂", "😮", "😢", "😡", "👍"];
 
 function ReactionPicker({
   onSelect,
@@ -667,7 +660,7 @@ function SnapViewer({
         style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
       >
         <span className="text-white text-xs font-semibold tracking-wide select-none">
-          \uD83D\uDEAB Screenshots are not allowed
+          🚫 Screenshots are not allowed
         </span>
       </div>
 
@@ -687,9 +680,9 @@ function SnapViewer({
             : `Sent to @${msg.receiverId}`}
         </p>
         {msg.content &&
-          msg.content !== "\uD83D\uDCF8 Sent a snap" &&
-          msg.content !== "\uD83D\uDCF9 Sent a video snap" &&
-          msg.content !== "\uD83D\uDCF7 Sent a photo" && (
+          msg.content !== "📸 Sent a snap" &&
+          msg.content !== "📹 Sent a video snap" &&
+          msg.content !== "📷 Sent a photo" && (
             <p className="text-[#B0B0CC] text-xs mt-0.5">{msg.content}</p>
           )}
       </div>
@@ -781,9 +774,7 @@ function SnapBubble({
       >
         <Camera size={16} color="#00CFFF" />
         <span className="text-sm font-semibold" style={{ color: "#00CFFF" }}>
-          {msg.isVideo
-            ? "\uD83C\uDFA5 Tap to open video"
-            : "\uD83D\uDCF8 Tap to open snap"}
+          {msg.isVideo ? "🎥 Tap to open video" : "📸 Tap to open snap"}
         </span>
       </motion.button>
     );
@@ -821,9 +812,7 @@ function SnapBubble({
         >
           <Camera size={16} color="#00CFFF" />
           <span className="text-sm font-medium text-white">
-            {msg.isVideo
-              ? "\uD83C\uDFA5 Video snap sent"
-              : "\uD83D\uDCF8 Snap sent"}
+            {msg.isVideo ? "🎥 Video snap sent" : "📸 Snap sent"}
           </span>
         </div>
       )}
@@ -866,7 +855,7 @@ function VoiceMessageBubble({ messageId }: { messageId: string }) {
       }}
     >
       <Mic size={14} color="#B0B0CC" />
-      <span className="text-sm text-[#B0B0CC]">\uD83C\uDFA4 Voice message</span>
+      <span className="text-sm text-[#B0B0CC]">🎤 Voice message</span>
     </div>
   );
 }
@@ -1771,7 +1760,7 @@ function ConversationList({
                             color: "#FF7800",
                           }}
                         >
-                          \uD83D\uDD25 {streak}
+                          🔥 {streak}
                         </span>
                       )}
                     </div>
@@ -1999,7 +1988,7 @@ function ChatView({
             const dataUrl = reader.result as string;
             if (!currentUser) return;
             // Send voice message to backend
-            const msgContent = "\uD83C\uDFA4 Voice message";
+            const msgContent = "🎤 Voice message";
             const encodedContent =
               disappearTimer > 0
                 ? `[DISAPPEAR:${disappearTimer}]${msgContent}`
@@ -2088,8 +2077,8 @@ function ChatView({
               "";
             const state = data.address?.state || data.address?.country || "";
             const locationText = city
-              ? `\uD83D\uDCCD ${city}${state ? `, ${state}` : ""} \u2014 shared for ${durationLabel}`
-              : `\uD83D\uDCCD Location shared \u2014 for ${durationLabel}`;
+              ? `📍 ${city}${state ? `, ${state}` : ""} — shared for ${durationLabel}`
+              : `📍 Location shared — for ${durationLabel}`;
             const encodedContent =
               disappearTimer > 0
                 ? `[DISAPPEAR:${disappearTimer}]${locationText}`
@@ -2188,7 +2177,7 @@ function ChatView({
   };
 
   const isVoiceMessage = (content: string) =>
-    parseDisappearTag(content).cleanContent === "\uD83C\uDFA4 Voice message";
+    parseDisappearTag(content).cleanContent === "🎤 Voice message";
 
   return (
     <div className="flex flex-col h-full" style={{ background: "#1A1A2E" }}>
@@ -2216,7 +2205,7 @@ function ChatView({
                 className="text-xs font-bold px-1.5 py-0.5 rounded-full"
                 style={{ background: "rgba(255,120,0,0.15)", color: "#FF7800" }}
               >
-                \uD83D\uDD25 {streak} day{streak !== 1 ? "s" : ""}
+                🔥 {streak} day{streak !== 1 ? "s" : ""}
               </span>
             )}
           </div>
@@ -2241,7 +2230,7 @@ function ChatView({
         {visibleMessages.length === 0 && (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-[#B0B0CC] text-sm">
-              Say hi to {displayName}! \uD83D\uDC4B
+              Say hi to {displayName}! 👋
             </p>
           </div>
         )}
