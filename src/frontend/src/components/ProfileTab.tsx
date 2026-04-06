@@ -182,8 +182,8 @@ function LeaderboardPanel({
             {/* Podium */}
             {top3.length >= 2 && (
               <div className="flex items-end justify-center gap-2 mb-6 px-2">
-                {podiumOrder.map((idx) => {
-                  const entry = top3[idx];
+                {podiumOrder.map((dataIdx, visualPos) => {
+                  const entry = top3[dataIdx];
                   if (!entry) return null;
                   const isMe = entry.username === currentUsername;
                   return (
@@ -191,12 +191,12 @@ function LeaderboardPanel({
                       key={entry.username}
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.1 }}
+                      transition={{ delay: visualPos * 0.1 }}
                       className="flex flex-col items-center gap-1 flex-1"
                     >
                       <span
                         className="text-xs font-bold"
-                        style={{ color: podiumColors[idx] }}
+                        style={{ color: podiumColors[visualPos] }}
                       >
                         {entry.displayName.split(" ")[0]}
                       </span>
@@ -204,23 +204,25 @@ function LeaderboardPanel({
                         {entry.snapScore.toLocaleString()} pts
                       </span>
                       <div
-                        className={`w-full ${podiumHeights[idx]} rounded-t-xl flex flex-col items-center justify-center gap-1`}
+                        className={`w-full ${podiumHeights[visualPos]} rounded-t-xl flex flex-col items-center justify-center gap-1`}
                         style={{
                           background: isMe
-                            ? `linear-gradient(180deg, ${podiumColors[idx]}44, ${podiumColors[idx]}22)`
-                            : `linear-gradient(180deg, ${podiumColors[idx]}33, ${podiumColors[idx]}11)`,
+                            ? `linear-gradient(180deg, ${podiumColors[visualPos]}44, ${podiumColors[visualPos]}22)`
+                            : `linear-gradient(180deg, ${podiumColors[visualPos]}33, ${podiumColors[visualPos]}11)`,
                           border: isMe
-                            ? `2px solid ${podiumColors[idx]}`
-                            : `1px solid ${podiumColors[idx]}55`,
+                            ? `2px solid ${podiumColors[visualPos]}`
+                            : `1px solid ${podiumColors[visualPos]}55`,
                           boxShadow: isMe
-                            ? `0 0 16px ${podiumColors[idx]}44`
+                            ? `0 0 16px ${podiumColors[visualPos]}44`
                             : "none",
                         }}
                       >
-                        <span className="text-xl">{podiumEmojis[idx]}</span>
+                        <span className="text-xl">
+                          {podiumEmojis[visualPos]}
+                        </span>
                         <span
                           className="text-xs font-bold"
-                          style={{ color: podiumColors[idx] }}
+                          style={{ color: podiumColors[visualPos] }}
                         >
                           #{entry.rank}
                         </span>
