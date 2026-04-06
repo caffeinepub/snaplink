@@ -378,7 +378,7 @@ actor {
     };
     usersByUsername.add(username, profile);
     usersByPrincipal.add(caller.toText(), username);
-    AccessControl.assignRole(accessControlState, caller, caller, #user);
+    accessControlState.userRoles.add(caller, #user);
     #ok(profile);
   };
 
@@ -422,7 +422,7 @@ actor {
     };
     usersByUsername.add(username, profile);
     usersByPrincipal.add(caller.toText(), username);
-    AccessControl.assignRole(accessControlState, caller, caller, #user);
+    accessControlState.userRoles.add(caller, #user);
     #ok(profile);
   };
 

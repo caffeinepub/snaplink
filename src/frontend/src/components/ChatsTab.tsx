@@ -831,7 +831,7 @@ function ReactionPills({ reactions }: { reactions: Reaction[] }) {
 
 // ─── SnapVideo helper ─────────────────────────────────────────────────────────
 
-function SnapVideo({ src }: { src: string }) {
+function SnapVideo({ src, onLoaded }: { src: string; onLoaded?: () => void }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
@@ -857,6 +857,7 @@ function SnapVideo({ src }: { src: string }) {
       loop
       className="w-full rounded-2xl"
       style={{ maxHeight: "70vh", objectFit: "contain" }}
+      onCanPlay={onLoaded}
     />
   );
 }
@@ -877,14 +878,19 @@ function SnapViewer({
   onViewed: () => void;
 }) {
   const isReceived = msg.receiverId === currentUsername;
+  const viewedRef = useRef(false);
 
-  useEffect(() => {
-    if (isReceived && !msg.snapViewed) {
+  // Called once the image/video has actually rendered successfully
+  const handleMediaLoaded = useCallback(() => {
+    if (isReceived && !msg.snapViewed && !viewedRef.current) {
+      viewedRef.current = true;
       onViewed();
     }
-  }, [msg.snapViewed, isReceived, onViewed]);
+  }, [isReceived, msg.snapViewed, onViewed]);
 
   const mediaSrc = snapMediaUrl ?? msg.snapDataUrl;
+  // True while we're still waiting for the backend to return the blob URL
+  const isFetchingMedia = !mediaSrc && !!msg.snapBlobId;
 
   return (
     <motion.div
@@ -936,7 +942,7 @@ function SnapViewer({
       >
         {mediaSrc ? (
           msg.isVideo ? (
-            <SnapVideo src={mediaSrc} />
+            <SnapVideo src={mediaSrc} onLoaded={handleMediaLoaded} />
           ) : (
             <img
               src={mediaSrc}
@@ -949,9 +955,22 @@ function SnapViewer({
                 WebkitUserSelect: "none",
                 pointerEvents: "none",
               }}
+              onLoad={handleMediaLoaded}
               onContextMenu={(e) => e.preventDefault()}
             />
           )
+        ) : isFetchingMedia ? (
+          /* Still downloading the snap from the backend */
+          <div
+            className="w-full h-64 rounded-2xl flex flex-col items-center justify-center gap-3"
+            style={{ background: "#1A1F33" }}
+          >
+            <div
+              className="w-10 h-10 rounded-full border-2 border-t-transparent animate-spin"
+              style={{ borderColor: "#00CFFF", borderTopColor: "transparent" }}
+            />
+            <p className="text-[#B0B0CC] text-sm">Loading snap…</p>
+          </div>
         ) : (
           <div
             className="w-full h-64 rounded-2xl flex flex-col items-center justify-center gap-3"
